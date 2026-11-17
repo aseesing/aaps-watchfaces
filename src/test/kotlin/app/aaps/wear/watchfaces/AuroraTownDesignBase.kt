@@ -28,6 +28,7 @@ import app.aaps.shared.impl.weardata.ZipWatchfaceFormat
 import app.aaps.wear.R
 import app.aaps.wear.phonepreview.DesignAccess
 import app.aaps.wear.watchfaces.animation.LayerAnimator
+import app.aaps.wear.watchfaces.animation.WakeAnimationJson
 import app.aaps.wear.watchfaces.animation.WakeAnimationSpec
 import app.aaps.wear.watchfaces.animation.WakeAnimator
 import app.aaps.wear.watchfaces.animation.WakeTimer
@@ -55,6 +56,7 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -85,7 +87,8 @@ import kotlin.math.sqrt
  * Two designs share all of this (see [animated]):
  * - [CwfAuroraTownDesignTest] (`Aurora_Town.zip`) for this branch: the aurora waves, the lights blink
  *   and snow falls while the wake animation plays; the aurora and the lights stay on afterwards. The
- *   watch draws the moon in today's phase.
+ *   watch draws the moon in today's phase, as a layer below the aurora: the aurora is light in our own
+ *   air, so it lies over the moon, and the dark part of the moon never looks darker than the sky.
  * - [CwfAuroraTownStockDesignTest] (`Aurora_Town_mmol_AAPS4.zip`) and [CwfAuroraTownStockMgdlDesignTest] (`Aurora_Town_mgdl_AAPS4.zip`) for plain AAPS: the aurora, the moon and
  *   the lights are in the background picture, and the snow is the second hand, so it moves once a
  *   second. Only what plain AAPS knows is in the json.
@@ -226,7 +229,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
 
         // Every view this design does not use is off
         val used = mutableSetOf("background", "time", "hour", "minute", "sgv", CAP_VIEW, "direction", "hour_hand", "minute_hand", SHADE_VIEW)
-        if (animated) used += MOON_VIEW else used += "second_hand"
+        if (!animated) used += "second_hand"
         keys().asSequence().toList().forEach { key ->
             val view = optJSONObject(key) ?: return@forEach
             if (view.has("visibility") && key !in used) view.put("visibility", "gone")
@@ -257,10 +260,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         place("hour_hand", handBox())
         place("minute_hand", handBox())
         if (animated) {
-            // The watch draws the moon itself, lit as it is in the sky tonight (see MoonPicture)
-            val half = AuroraTownImages.MOON_SIZE / 2f
-            place(MOON_VIEW, (AuroraTownImages.MOON_X - half).roundToInt(), (AuroraTownImages.MOON_Y - half).roundToInt(), AuroraTownImages.MOON_SIZE.roundToInt())
-                .put("textvalue", "").put(MoonPicture.JSON_KEY, true)
+            // The moon is a layer of the animation (see moonLayer), so the aurora can lie over it
             put(WakeAnimationSpec.JSON_KEY, animationJson())
         } else {
             place("second_hand", 0, 0, 400)
@@ -278,9 +278,17 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         .put("dynValue", JSONObject().put("minValue", 0).put("maxValue", if (mgdl) 1800 else 100))
         .put("textvalue1", capFormat).put("invalidTextvalue", "")
 
-    /** The wake animation: the aurora waves, the lights twinkle and chase, snow blows from left to right. */
+    /**
+     * The wake animation: the aurora waves, the lights twinkle and chase, snow blows from left to right.
+     * From the back to the front: the light of the moon, the moon, the aurora, the lights, the star and
+     * the snow.
+     */
     private fun animationJson(): JSONObject {
         val layers = JSONArray()
+        // The light of the moon around it, and the moon itself, lit as it is in the sky tonight. Both
+        // below the aurora: the aurora is light in our own air, in front of everything in the sky.
+        layers.put(moonGlowLayer())
+        layers.put(moonLayer())
         // Two curtains of northern lights, only in the sky. Their motion is scaled by env, so they lie
         // still at rest, the same as at the start and the end of a wake.
         layers.put(
@@ -296,8 +304,6 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
                 scaleY = "1 + env*0.05*sin(t*0.33 + 1)"
             )
         )
-        // The light of the moon around it, behind the moon view
-        layers.put(moonGlowLayer())
         // The lights on the eaves: a gentle twinkle while it plays, steady at rest
         layers.put(lightsLayer(AuroraTownImages.EAVE_LIGHTS, EAVE_COLOR, TWINKLE))
         // The tree: one layer per colour; the warm white ones twinkle, the coloured ones chase each other
@@ -338,15 +344,18 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
 
     /**
      * The light of the moon ([AuroraTownMoonGlow]): one picture in the back slot that stays on the face
-     * (`rest`), so the moon view is drawn over it. It follows the moon of tonight through two values of
+     * (`rest`), so the moon layer is drawn over it. It follows the moon of tonight through two values of
      * the watch: `moon_phase` (0 new, 0.25 first quarter, 0.5 full) for how much is lit and on which side,
      * and `moon_cycle` (0 moonrise, 0.25 high in the sky, 0.5 moonset) for how the moon is turned in the
-     * sky. A mask keeps it out of the disc, so the dark part of the moon stays dark.
+     * sky. The moon layer is drawn over it: its lit part covers the light, and through the dark part
+     * the part [AuroraTownMoonGlow.Look.through] of [look] shows (a mask, when that is not all of it), as
+     * the glare of the moon in our air lies in front of the dark part too. So the dark part is about as
+     * bright as the sky right beside the disc.
      */
-    private fun moonGlowLayer(): JSONObject {
+    private fun moonGlowLayer(look: AuroraTownMoonGlow.Look = AuroraTownMoonGlow.LOOK): JSONObject {
         val glow = AuroraTownMoonGlow
         val r = AuroraTownImages.MOON_SIZE / 2f
-        val reach = glow.REACH * r
+        val reach = look.reach * r
         val around = rect(AuroraTownImages.MOON_X - reach, AuroraTownImages.MOON_Y - reach, 2 * reach, 2 * reach)
         // How much of the moon is lit (glow.strength, glow.scale and glow.shift, as formulas)
         val lit = "(1-cos(2*pi*v_moon_phase))/2"
@@ -357,8 +366,22 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         val turn = "$MOON_TURN*cos(2*pi*v_moon_cycle)"
         return JSONObject().put("image", MOON_HALO).put("rect", around).put("slot", "back").put("blend", "screen").put("rest", 0)
             .put("x", "$away*cos($turn)").put("y", "-$away*sin($turn)")
-            .put("scale", "${glow.NEW_SCALE}+${round2(1 - glow.NEW_SCALE)}*$lit").put("alpha", "${glow.FULL_STRENGTH}*pow($lit, ${glow.GROWTH})")
-            .put("clip", JSONObject().put("mask", MOON_HOLE).put("maskRect", around))
+            .put("scale", "${glow.NEW_SCALE}+${round2(1 - glow.NEW_SCALE)}*$lit").put("alpha", "${look.strength}*pow($lit, ${glow.GROWTH})")
+            .apply { if (glow.hasHole(look)) put("clip", JSONObject().put("mask", MOON_HOLE).put("maskRect", around)) }
+    }
+
+    /** The pictures of the light of the moon for [look]. */
+    private fun moonGlowImages(look: AuroraTownMoonGlow.Look = AuroraTownMoonGlow.LOOK): Map<String, ByteArray> =
+        mapOf(MOON_HALO to AuroraTownMoonGlow.haloPng(look)) + (if (AuroraTownMoonGlow.hasHole(look)) mapOf(MOON_HOLE to AuroraTownMoonGlow.holePng(look)) else emptyMap())
+
+    /**
+     * The moon as the watch draws it (`"moon": true`, see [MoonPicture]): today's phase, turned as it
+     * stands in the sky. A layer that stays on the face (`rest`), in the back slot below the aurora.
+     */
+    private fun moonLayer(): JSONObject {
+        val half = AuroraTownImages.MOON_SIZE / 2f
+        val box = rect((AuroraTownImages.MOON_X - half).roundToInt().toFloat(), (AuroraTownImages.MOON_Y - half).roundToInt().toFloat(), AuroraTownImages.MOON_SIZE, AuroraTownImages.MOON_SIZE)
+        return JSONObject().put(WakeAnimationJson.MOON, true).put("rect", box).put("slot", "back").put("rest", 0)
     }
 
     /** The light of the star ([AuroraTownImages.starGlow]), screened over the gold star of the photo. */
@@ -406,10 +429,8 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
             SKY_MASK to pictures.skyMask(),
             CRYSTAL_SMALL to pictures.crystalSmall(),
             CRYSTAL_BIG to pictures.crystalBig(),
-            MOON_HALO to AuroraTownMoonGlow.haloPng(),
-            MOON_HOLE to AuroraTownMoonGlow.holePng(),
             STAR_GLOW to pictures.starGlow()
-        ) else common + mapOf(
+        ) + moonGlowImages() else common + mapOf(
             ResFileMap.BACKGROUND.fileName to pictures.stockBackground(),
             ResFileMap.SECOND_HAND.fileName to pictures.secondHandSnow()
         )
@@ -500,9 +521,11 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         LocalDateTime.of(2026, 12, 24, hour, minute, second).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     /** A face that shows the design at [instant] with [sample], drawn once, so its views are laid out. */
-    private fun face(instant: Long, sample: Sample = sample(), place: GeoPoint? = null, change: (JSONObject) -> Unit = {}): Pair<CustomWatchface, Bitmap> {
+    private fun face(
+        instant: Long, sample: Sample = sample(), place: GeoPoint? = null, extraImages: Map<String, ByteArray> = emptyMap(), change: (JSONObject) -> Unit = {}
+    ): Pair<CustomWatchface, Bitmap> {
         val design = design(default).also(change)
-        val face = storedFace(design, default, images(), instant)
+        val face = storedFace(design, default, images() + extraImages, instant)
         // The place the phone sent last, which turns the moon as it stands in the sky there
         place?.let {
             face.sp.putDouble(R.string.key_location_latitude, it.latitude)
@@ -551,7 +574,10 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         val design = design(default)
         val (face, _) = face(instant, place = place)
         var clock = 0L
-        val animator = WakeAnimator(heartRate = { 72 }, value = { key -> moonValue(key, instant, place) }, timer = WakeTimer { clock })
+        val animator = WakeAnimator(
+            heartRate = { 72 }, value = { key -> moonValue(key, instant, place) },
+            moon = { ms, size -> DesignAccess.wakeMoon(face, ms, size) }, timer = WakeTimer { clock }
+        )
         animator.setDesign(readAnimation(design))
         return atMs.associateWith { ms ->
             clock = ms
@@ -940,7 +966,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         val r = AuroraTownImages.MOON_SIZE / 2f
         val cx = AuroraTownImages.MOON_X
         val cy = AuroraTownImages.MOON_Y
-        val half = (AuroraTownMoonGlow.REACH * r + 6).roundToInt()
+        val half = (AuroraTownMoonGlow.LOOK.reach * r + 6).roundToInt()
         val zoom = Rect((cx - half).roundToInt(), (cy - half).roundToInt(), (cx + half).roundToInt(), (cy + half).roundToInt())
         fun crop(b: Bitmap) = Rect(zoom).let { it.intersect(0, 0, 400, 400); Bitmap.createBitmap(b, it.left, it.top, it.width(), it.height()) }
         fun distance(x: Int, y: Int) = sqrt((x + 0.5f - cx) * (x + 0.5f - cx) + (y + 0.5f - cy) * (y + 0.5f - cy)) / r
@@ -956,9 +982,17 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
             cells += "$name: no glow" to crop(bare)
             cells += "$name: glow" to crop(rest)
             cells += "$name: wake" to crop(wake)
-            // Nothing glows inside the disc: the dark part stays as dark as without the glow
-            val (_, inside) = added(rest, bare, zoom) { x, y -> distance(x, y) < 0.9f }
-            assertWithMessage("$name: change inside the disc").that(inside).isAtMost(2)
+            // The lit part of the moon covers the glow: it looks the same with and without it. (The dark
+            // part lets it through, see theAuroraLiesOverTheMoon.)
+            val litAngle = Math.toRadians(litDirections(t, place).first)
+            if (MoonLight.at(t, place).litFraction > 0.4) {
+                val (_, onLit) = added(rest, bare, zoom) { x, y ->
+                    val dx = x + 0.5f - cx
+                    val dy = y + 0.5f - cy
+                    distance(x, y) in 0.3f..0.85f && (dx * cos(litAngle) + dy * sin(litAngle)) / (distance(x, y) * r) > cos(Math.toRadians(30.0))
+                }
+                assertWithMessage("$name: change on the lit part").that(onLit).isAtMost(2)
+            }
             // The texts are not touched; at most a trace of light reaches the sky beside the tip of the arrow
             for (box in listOf(timeBox(), sgvBox())) assertWithMessage("$name: change in $box").that(added(rest, bare, box) { _, _ -> true }.second).isAtMost(2)
             val nearArrow = added(rest, bare, arrowBox()) { _, _ -> true }.second
@@ -966,7 +1000,6 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
             assertWithMessage("$name: change beside the arrow").that(nearArrow).isAtMost(MAX_GLOW_BY_TEXT)
             // Around the disc it glows with the lit part, the most on the lit side
             ringGain[name] = added(rest, bare, zoom) { x, y -> distance(x, y) in 1.1f..1.6f }.first
-            val litAngle = Math.toRadians(litDirections(t, place).first)
             fun gainAt(sign: Int): Double = added(rest, bare, zoom) { x, y ->
                 val px = cx + sign * 1.3f * r * cos(litAngle).toFloat()
                 val py = cy + sign * 1.3f * r * sin(litAngle).toFloat()
@@ -982,7 +1015,146 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         assertThat(ringGain.getValue("thin waxing")).isGreaterThan(0.0)
     }
 
+    /** The design without the two curtains of the aurora, to compare. */
+    private fun withoutAurora(design: JSONObject) {
+        val layers = design.getJSONObject(WakeAnimationSpec.JSON_KEY).getJSONArray("layers")
+        for (i in layers.length() - 1 downTo 0) if (layers.getJSONObject(i).optString("image") in setOf(AURORA, AURORA_MIRRORED)) layers.remove(i)
+    }
+
+    /**
+     * The mean luminance of [bitmap] over the pixels whose distance from the middle of the moon (in
+     * radii) is in [distance], and whose direction from the middle is within [spread] of [angle]
+     * (degrees on the screen, x right, y down; null for all directions). NaN when there are none.
+     */
+    private fun meanAt(bitmap: Bitmap, distance: ClosedFloatingPointRange<Float>, angle: Double? = null, spread: Double = 35.0): Double {
+        val r = AuroraTownImages.MOON_SIZE / 2f
+        val cx = AuroraTownImages.MOON_X
+        val cy = AuroraTownImages.MOON_Y
+        var sum = 0.0
+        var n = 0
+        val reach = (distance.endInclusive * r).toInt() + 2
+        for (y in (cy - reach).toInt()..(cy + reach).toInt()) for (x in (cx - reach).toInt()..(cx + reach).toInt()) {
+            if (x !in 0 until 400 || y !in 0 until 400) continue
+            val dx = x + 0.5f - cx
+            val dy = y + 0.5f - cy
+            if (sqrt(dx * dx + dy * dy) / r !in distance) continue
+            if (angle != null) {
+                val off = abs(((Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())) - angle) % 360 + 540) % 360 - 180)
+                if (off > spread) continue
+            }
+            sum += luminance(bitmap.getPixel(x, y))
+            n++
+        }
+        return if (n > 0) sum / n else Double.NaN
+    }
+
+    @Test
+    fun theAuroraLiesOverTheMoon() {
+        val r = AuroraTownImages.MOON_SIZE / 2f
+        val cx = AuroraTownImages.MOON_X
+        val cy = AuroraTownImages.MOON_Y
+        val half = (2.2f * r).roundToInt()
+        fun crop(b: Bitmap) = Bitmap.createBitmap(b, (cx - half).roundToInt(), (cy - half).roundToInt(), 2 * half, 2 * half).let { Bitmap.createScaledBitmap(it, it.width * 3, it.height * 3, false) }
+        val cells = mutableListOf<Pair<String, Bitmap>>()
+        if (!animated) {
+            // The moon is in the background picture: a crescent lit to the lower right (limb angle 240)
+            val (_, picture) = face(PREVIEW_MS)
+            val dark = 240.0 - 90.0 + 180.0
+            val inside = meanAt(picture, 0.55f..0.85f, dark, 25.0)
+            val edge = meanAt(picture, 1.03f..1.15f, dark, 25.0)
+            val beside = meanAt(picture, 1.1f..1.35f, dark, 25.0)
+            println("$fileName stock moon: dark part $inside, sky at the edge $edge, beside $beside")
+            assertWithMessage("stock: the dark part is not darker than the sky beside it").that(inside).isAtLeast(max(edge, beside) - DARK_TOLERANCE)
+            sheet(listOf("stock" to crop(picture)), "aurora/${fileName}_moon-under-aurora.png", cols = 1)
+            return
+        }
+        val place = GeoPoint(52.09, 5.12) // the Netherlands
+        // Every check is made first and asserted at the end, so the sheet is always written to look at
+        val failures = mutableListOf<String>()
+        val phases = listOf("waxing crescent" to 0.12, "first quarter" to 0.25, "waxing gibbous" to 0.38, "full" to 0.5, "waning crescent" to 0.88)
+        for ((name, phase) in phases) {
+            val t = momentOf(phase, place)
+            val (shown, rest) = face(t, place = place)
+            val (_, bare) = face(t, place = place, change = ::withoutAurora)
+            val (_, noGlow) = face(t, place = place, change = ::withoutMoonGlow)
+            val wake = wakeFrames(listOf(0L, PREVIEW_WAKE_MS), t, place).getValue(PREVIEW_WAKE_MS)!!
+            cells += "$name" to crop(rest)
+            cells += "$name: no aurora" to crop(bare)
+            cells += "$name: wake" to crop(wake)
+            cells += "$name: no moon light" to crop(noGlow)
+            // The moon is on the face, at rest and in the wake
+            val moonNow = DesignAccess.wakeMoon(shown, t, AuroraTownImages.MOON_SIZE.roundToInt())
+            if (moonNow == null) failures += "$name: the watch has no moon"
+            // The aurora lies over the disc too: it adds light there as it does round it
+            val gainInside = meanAt(rest, 0f..0.9f) - meanAt(bare, 0f..0.9f)
+            val gainAround = meanAt(rest, 1.1f..1.6f) - meanAt(bare, 1.1f..1.6f)
+            // The dark part, near its edge, against the sky just outside it on the same side
+            val darkAngle = litDirections(t, place).first + 180.0
+            val lit = MoonLight.at(t, place).litFraction
+            val inner = if (lit > 0.6) 0.75f..0.9f else 0.55f..0.85f
+            println("$fileName under aurora $name: ${Instant.ofEpochMilli(t)}, lit $lit, aurora gain inside $gainInside, around $gainAround")
+            if (!(gainInside > 0.0)) failures += "$name: the aurora adds no light over the moon"
+            if (lit < 0.95) for ((frameName, frame) in listOf("rest" to rest, "wake" to wake, "no aurora" to bare, "no moon light" to noGlow)) {
+                val inside = meanAt(frame, inner, darkAngle, 25.0)
+                // Right beside the disc, where the light of the moon is the brightest, and a little further out
+                val edge = meanAt(frame, 1.03f..1.15f, darkAngle, 25.0)
+                val beside = meanAt(frame, 1.1f..1.35f, darkAngle, 25.0)
+                println("$fileName under aurora $name $frameName: dark part $inside, sky at the edge $edge, beside $beside")
+                // The frames without the aurora or without the light of the moon are only to compare
+                if (frame !== bare && frame !== noGlow && inside < max(edge, beside) - DARK_TOLERANCE)
+                    failures += "$name $frameName: the dark part ($inside) is darker than the sky beside it ($edge, $beside)"
+            }
+        }
+        sheet(cells, "aurora/moon-under-aurora.png", cols = 4)
+        assertWithMessage(failures.joinToString("\n")).that(failures).isEmpty()
+    }
+
+    /** The design with the light of the moon of [look] in place of the chosen one. */
+    private fun withMoonGlow(design: JSONObject, look: AuroraTownMoonGlow.Look) {
+        val layers = design.getJSONObject(WakeAnimationSpec.JSON_KEY).getJSONArray("layers")
+        for (i in 0 until layers.length()) if (layers.getJSONObject(i).optString("image") == MOON_HALO) layers.put(i, moonGlowLayer(look))
+    }
+
+    /** The rest face at [t] in [place] with the light of the moon of [look]. */
+    private fun faceWithGlow(t: Long, place: GeoPoint, look: AuroraTownMoonGlow.Look): Bitmap =
+        face(t, place = place, extraImages = moonGlowImages(look)) { withMoonGlow(it, look) }.second
+
+    /**
+     * The looks of the light of the moon ([AuroraTownMoonGlow.LOOKS]) side by side on one sheet, to
+     * choose from: the rest face round the moon at five phases.
+     */
+    @Test
+    fun theLooksOfTheMoonGlowSideBySide() {
+        assumeTrue(animated)
+        val place = GeoPoint(52.09, 5.12) // the Netherlands
+        val r = AuroraTownImages.MOON_SIZE / 2f
+        val cx = AuroraTownImages.MOON_X
+        val cy = AuroraTownImages.MOON_Y
+        val half = (2.2f * r).roundToInt()
+        fun crop(b: Bitmap) = Bitmap.createBitmap(b, (cx - half).roundToInt(), (cy - half).roundToInt(), 2 * half, 2 * half).let { Bitmap.createScaledBitmap(it, it.width * 3, it.height * 3, false) }
+        val phases = listOf("waxing crescent" to 0.12, "first quarter" to 0.25, "waxing gibbous" to 0.38, "full" to 0.5, "waning crescent" to 0.88)
+        val cells = mutableListOf<Pair<String, Bitmap>>()
+        for ((name, phase) in phases) {
+            val t = momentOf(phase, place)
+            val darkAngle = litDirections(t, place).first + 180.0
+            val lit = MoonLight.at(t, place).litFraction
+            val inner = if (lit > 0.6) 0.75f..0.9f else 0.55f..0.85f
+            for (look in AuroraTownMoonGlow.LOOKS) {
+                val rest = faceWithGlow(t, place, look)
+                cells += "$name: ${look.name}" to crop(rest)
+                if (lit < 0.95) println(
+                    "$fileName glow look ${look.name} $name: dark part ${meanAt(rest, inner, darkAngle, 25.0)}, " +
+                        "sky at the edge ${meanAt(rest, 1.03f..1.15f, darkAngle, 25.0)}, beside ${meanAt(rest, 1.1f..1.35f, darkAngle, 25.0)}"
+                )
+            }
+        }
+        sheet(cells, "aurora/moon-glow-options.png", cols = AuroraTownMoonGlow.LOOKS.size)
+    }
+
     protected companion object {
+
+        /** How much darker (luminance) the dark part of the moon may be than the sky beside it: less than an eye can see. */
+        const val DARK_TOLERANCE = 0.005
 
         private val PICTURES by lazy { AuroraTownImages() }
 
@@ -1031,9 +1203,8 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
          */
         const val MIN_CONTRAST = 2.0
 
-        /** The views: the white cap of the glucose value, the moon, and the shade behind the texts. */
+        /** The views: the white cap of the glucose value and the shade behind the texts. */
         const val CAP_VIEW = "freetext1"
-        const val MOON_VIEW = "freetext2"
         const val SHADE_VIEW = "cover_chart"
 
         /** The shade: where, how dark in its middle (0 to 255), and how much of it is fully dark (0 to 1 of its radius). */

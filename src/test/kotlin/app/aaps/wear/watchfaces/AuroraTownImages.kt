@@ -713,6 +713,8 @@ class AuroraTownImages(
     private fun stockPicture(): Rgb {
         val image = withClock.copy()
         val n = SIZE * SIZE
+        // The moon and its light first: the aurora is light in our own air, so it lies over the moon
+        drawMoon(image)
         // The aurora, screened through the sky mask
         for (i in 0 until n) {
             // The mask goes on beyond the round screen; the picture stays black there
@@ -722,7 +724,6 @@ class AuroraTownImages(
             image.g[i] = screen(image.g[i], auroraRgb.g[i] * m)
             image.b[i] = screen(image.b[i], auroraRgb.b[i] * m)
         }
-        drawMoon(image)
         drawLights(image)
         drawStarGlow(image)
         return image
@@ -735,7 +736,7 @@ class AuroraTownImages(
         val size = (MOON_SIZE * SCALE).roundToInt()
         val limb = Math.toRadians(MOON_LIMB_ANGLE)
         val glowColor = Color.parseColor(AuroraTownMoonGlow.COLOR)
-        val reach = ceil(AuroraTownMoonGlow.REACH * size / 2f).toInt() + 2
+        val reach = ceil(AuroraTownMoonGlow.LOOK.reach * size / 2f).toInt() + 2
         for (j in (cy - reach).toInt()..(cy + reach).toInt()) for (i in (cx - reach).toInt()..(cx + reach).toInt()) {
             if (i !in 0 until SIZE || j !in 0 until SIZE) continue
             val v = AuroraTownMoonGlow.lightAt(i + 0.5f - cx, j + 0.5f - cy, size / 2f, (1 - MOON_TERMINATOR) / 2, -sin(limb).toFloat(), -cos(limb).toFloat())
