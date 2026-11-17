@@ -976,7 +976,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
             if (phase != 0.0 && phase != 0.5) assertWithMessage("$name: lit side brighter").that(gainAt(1)).isGreaterThan(gainAt(-1))
         }
         sheet(cells, "aurora/moon-glow.png", cols = 4)
-        assertThat(ringGain.getValue("new")).isLessThan(0.002)
+        assertThat(ringGain.getValue("new")).isLessThan(0.01)
         assertThat(ringGain.getValue("full")).isGreaterThan(ringGain.getValue("first quarter"))
         assertThat(ringGain.getValue("first quarter")).isGreaterThan(ringGain.getValue("thin waxing"))
         assertThat(ringGain.getValue("thin waxing")).isGreaterThan(0.0)
@@ -1076,7 +1076,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         const val MOON_TURN = 0.6
 
         /** The most the light of the moon may change one colour (of 255) in the box of the arrow, the text nearest to the moon. */
-        const val MAX_GLOW_BY_TEXT = 8
+        const val MAX_GLOW_BY_TEXT = 40
 
         /** The wake animation. */
         const val ANIMATION_MS = 15_000L

@@ -32,16 +32,16 @@ object AuroraTownMoonGlow {
     const val REACH = 2.3f
 
     /** How strong the light is at full moon, 0 to 1. */
-    const val FULL_STRENGTH = 0.95
+    const val FULL_STRENGTH = 1.0
 
     /** How fast the light grows with the lit part: below 1, a thin crescent still has a little light. */
-    const val GROWTH = 0.6
+    const val GROWTH = 0.3
 
     /** The size of the light at new moon, against its size at full moon. */
     const val NEW_SCALE = 0.7
 
-    /** How far the middle of the light lies from the middle of the disc at new moon, in moon radii (about 0.42 at a quarter). */
-    const val LIT_SHIFT = 0.85
+    /** How far the middle of the light lies from the middle of the disc at new moon, in moon radii (about 0.15 at a quarter). */
+    const val LIT_SHIFT = 0.3
 
     /** The size of the picture of the light, in pixels. */
     const val HALO_PX = 96
@@ -60,14 +60,13 @@ object AuroraTownMoonGlow {
      * disc and falling off fast, with a faint wide skirt, like the glare of the moon in cold air.
      */
     fun light(d: Float): Float {
-        fun profile(x: Float): Float {
-            val k = x * REACH
-            val core = (1f / (1f + k * k)).pow(1.5f)
-            val skirt = exp(-x * x / (2 * SKIRT * SKIRT))
-            return (1 - SKIRT_PART) * core + SKIRT_PART * skirt
-        }
-        val end = profile(1f)
-        return ((profile(d) - end) / (profile(0f) - end)).coerceIn(0f, 1f) * (1 - d * d).coerceIn(0f, 1f)
+        // Measured from the edge of the disc, not from its middle: the disc itself is cut out by the
+        // mask, so the bright part must lie just outside it, or almost nothing of the light shows
+        val edge = 1f / REACH
+        val x = ((d - edge) / (1 - edge)).coerceAtLeast(0f)
+        val near = exp(-x / NEAR)
+        val skirt = exp(-x * x / (2 * SKIRT * SKIRT))
+        return ((1 - SKIRT_PART) * near + SKIRT_PART * skirt) * (1 - x * x).coerceIn(0f, 1f)
     }
 
     /**
@@ -111,7 +110,10 @@ object AuroraTownMoonGlow {
 
     /** How much of the light spreads to the sides: a faint skirt [SKIRT] of the reach wide. */
     private const val SKIRT_PART = 0.4f
-    private const val SKIRT = 0.36f
+
+    /** How fast the bright glare next to the disc falls off, as a part of the reach outside the disc. */
+    private const val NEAR = 0.12f
+    private const val SKIRT = 0.45f
 
     private fun sq(v: Float) = v * v
 
