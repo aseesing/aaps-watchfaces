@@ -44,8 +44,10 @@ import kotlin.math.sqrt
  * the full moon that the watch app draws itself ([MoonPicture]).
  *
  * The village is mirrored left to right (the church tower stands on the left) and fills the round
- * face. All pictures are 2 x the design size ([SCALE]): the face is 800 x 800 for a design of 400 x 400.
- * All places in the constants are in design coordinates (400 x 400), after the mirror.
+ * face. It is moved down by [PHOTO_SHIFT], so the star on the tree stays clear of the glucose value:
+ * the plain sky goes on above the top of the photo, and a little of the snow at the bottom is cut off.
+ * All pictures are 2 x the design size ([SCALE]): the face is 800 x 800 for a design of 400 x 400.
+ * All places in the constants are in design coordinates (400 x 400), after the mirror and the shift.
  *
  * Two zips use these pictures:
  * - the animated one: [animatedBackground] (village and clean clock only) with the aurora ([aurora],
@@ -113,6 +115,13 @@ class AuroraTownImages(
     /** The minute hand of the tower clock, like [hourHand]. PNG, [HAND_PX] square. */
     fun minuteHand(): ByteArray = minuteHandPng
 
+    /**
+     * The light of the star on the tree, for a screen blend over it: a soft round glow and thin soft
+     * rays, one warm colour with the brightness in the alpha. Its middle belongs on ([STAR_X], [STAR_Y]).
+     * PNG, [STAR_GLOW_PX] square for [STAR_GLOW_SIZE] design pixels.
+     */
+    fun starGlow(): ByteArray = starGlowPng
+
     /** The JPG quality that was used for each JPG picture, to report it. */
     fun jpgQualities(): Map<String, Int> = mapOf(
         "animated background" to animatedJpg.second, "stock background" to stockJpg.second,
@@ -162,13 +171,19 @@ class AuroraTownImages(
         for (k in TREE_OUTLINE.indices) {
             val (y, cx, half) = TREE_OUTLINE[k]
             val px = (cx - half) * OUT_PER_SOURCE
-            if (k == 0) outline.moveTo(px, y * OUT_PER_SOURCE) else outline.lineTo(px, y * OUT_PER_SOURCE)
+            val py = (y + SHIFT_SOURCE) * OUT_PER_SOURCE
+            if (k == 0) outline.moveTo(px, py) else outline.lineTo(px, py)
         }
         for (k in TREE_OUTLINE.indices.reversed()) {
             val (y, cx, half) = TREE_OUTLINE[k]
-            outline.lineTo((cx + half) * OUT_PER_SOURCE, y * OUT_PER_SOURCE)
+            outline.lineTo((cx + half) * OUT_PER_SOURCE, (y + SHIFT_SOURCE) * OUT_PER_SOURCE)
         }
         canvas.drawPath(outline, line)
+        // The star: the circle through its five points, and its middle
+        line.color = Color.rgb(255, 120, 0)
+        canvas.drawCircle(STAR_X * SCALE, STAR_Y * SCALE, STAR_SIZE / 2 * SCALE, line)
+        canvas.drawLine((STAR_X - 3) * SCALE, STAR_Y * SCALE, (STAR_X + 3) * SCALE, STAR_Y * SCALE, line)
+        canvas.drawLine(STAR_X * SCALE, (STAR_Y - 3) * SCALE, STAR_X * SCALE, (STAR_Y + 3) * SCALE, line)
         // The text area of the design
         line.color = Color.WHITE
         canvas.drawRect(80 * SCALE, 70 * SCALE, 320 * SCALE, 250 * SCALE, line)
@@ -185,11 +200,43 @@ class AuroraTownImages(
     /** The round photo area scaled to 800 x 800; the white surround is replaced by the edge of the photo. */
     private val photo: Rgb by lazy { roundPhoto(master) }
 
+    /**
+     * [master] blurred over [RIM_BLUR] source pixels. The face beyond the edge of the photo takes its
+     * colour from here, so the faint stars and the grain at the edge do not draw lines outward.
+     */
+    private val blurredMaster: Rgb by lazy {
+        Rgb(master.w, master.h).also {
+            blur(master.r, master.w, master.h, RIM_BLUR).copyInto(it.r)
+            blur(master.g, master.w, master.h, RIM_BLUR).copyInto(it.g)
+            blur(master.b, master.w, master.h, RIM_BLUR).copyInto(it.b)
+        }
+    }
+
     /** [photo] with the clean clock faces. */
     private val withClock: Rgb by lazy { toRgb(paintClocks(toBitmap(photo))) }
 
     /** The sky line in [master]: for each column, the first row that is not sky. */
     private val horizon: FloatArray by lazy { findHorizon(master) }
+
+    /**
+     * The star on the tree in [master], 0 to 1 per source pixel: a five pointed star a little
+     * ([STAR_MASK_MARGIN]) bigger than the gold star, with a soft edge.
+     */
+    private val starCover: FloatArray by lazy {
+        val bitmap = createBitmap(master.w, master.h)
+        val cx = STAR_X / DESIGN_PER_SOURCE
+        val cy = (STAR_Y - PHOTO_SHIFT) / DESIGN_PER_SOURCE
+        val outer = STAR_SIZE / 2 / DESIGN_PER_SOURCE
+        val path = Path()
+        for (k in 0 until 10) {
+            val a = k * PI.toFloat() / 5
+            val r = (if (k % 2 == 0) outer else outer * STAR_INNER) + STAR_MASK_MARGIN
+            if (k == 0) path.moveTo(cx + r * sin(a), cy - r * cos(a)) else path.lineTo(cx + r * sin(a), cy - r * cos(a))
+        }
+        path.close()
+        Canvas(bitmap).drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
+        alphaPlane(bitmap).also { for (i in it.indices) it[i] /= 255f }
+    }
 
     /** The sky mask, 0 to 1, 800 x 800. */
     private val sky: FloatArray by lazy { skyMaskPlane(horizon) }
@@ -209,6 +256,7 @@ class AuroraTownImages(
     private val snowPng: ByteArray by lazy { png(snowField()) }
     private val hourHandPng: ByteArray by lazy { png(hand(HOUR_LENGTH, HOUR_WIDTH, HOUR_TAIL)) }
     private val minuteHandPng: ByteArray by lazy { png(hand(MINUTE_LENGTH, MINUTE_WIDTH, MINUTE_TAIL)) }
+    private val starGlowPng: ByteArray by lazy { png(starGlowBitmap()) }
 
     // ---------------------------------------------------------------------------------------------
     // Photo
@@ -232,9 +280,10 @@ class AuroraTownImages(
     }
 
     /**
-     * The circle of the full frame of [source] scaled to [SIZE], 2 x 2 samples per pixel. Points
-     * beyond [PHOTO_RIM] source pixels from the centre take the colour at the rim, so the white
-     * surround never shows at the edge of the screen.
+     * The circle of the full frame of [source] scaled to [SIZE] and moved down by [PHOTO_SHIFT], 2 x 2
+     * samples per pixel. Points beyond [PHOTO_RIM] source pixels from the centre take the colour at
+     * the rim (of [blurredMaster]), so the white surround never shows at the edge of the screen. At the
+     * top, where the shift leaves room above the photo, this goes on with the smooth sky at the rim.
      */
     private fun roundPhoto(source: Rgb): Rgb {
         val out = Rgb(SIZE, SIZE)
@@ -246,13 +295,17 @@ class AuroraTownImages(
             var b = 0f
             for (sy in 0..1) for (sx in 0..1) {
                 var u = (i + 0.25f + 0.5f * sx) / OUT_PER_SOURCE
-                var v = (j + 0.25f + 0.5f * sy) / OUT_PER_SOURCE
+                var v = (j + 0.25f + 0.5f * sy) / OUT_PER_SOURCE - SHIFT_SOURCE
                 val d = hypot(u - c, v - c)
+                var from = source
                 if (d > PHOTO_RIM) {
-                    u = c + (u - c) * PHOTO_RIM / d
-                    v = c + (v - c) * PHOTO_RIM / d
+                    // A little inside the rim: the blur must not reach the white surround
+                    val rim = PHOTO_RIM - 3 * RIM_BLUR
+                    u = c + (u - c) * rim / d
+                    v = c + (v - c) * rim / d
+                    from = blurredMaster
                 }
-                bilinear(source, u, v, sample)
+                bilinear(from, u, v, sample)
                 r += sample[0]
                 g += sample[1]
                 b += sample[2]
@@ -422,6 +475,67 @@ class AuroraTownImages(
     }
 
     // ---------------------------------------------------------------------------------------------
+    // Star
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * How bright the light of the star is at ([dx], [dy]) design pixels from its middle, 0 to 1:
+     * a glow round the star, a faint wide skirt, and [STAR_RAYS] thin rays that fade toward their
+     * ends. The long rays go out through the five points of the star, the short ones between them.
+     * Zero at the edge of the [STAR_GLOW_SIZE] square, so the picture has no hard border.
+     */
+    private fun starLight(dx: Float, dy: Float): Float {
+        val radius = STAR_SIZE / 2
+        val d = hypot(dx, dy) / radius
+        val glow = STAR_GLOW_CORE / (1 + (d / 0.75f).pow(2)).pow(1.5f) + STAR_GLOW_SKIRT * exp(-d * d / (2 * 1.1f * 1.1f))
+        var rays = 0f
+        for (k in 0 until STAR_RAYS) {
+            val long = k % 2 == 0
+            // Straight up first, then round in steps; y goes down on the screen
+            val a = k * 2 * PI.toFloat() / STAR_RAYS
+            val along = dx * sin(a) - dy * cos(a)
+            if (along <= 0f) continue
+            val across = abs(dx * cos(a) + dy * sin(a))
+            val length = radius * (if (long) STAR_RAY_LONG else STAR_RAY_SHORT)
+            if (along >= length) continue
+            val f = 1 - along / length
+            val width = 0.7f + 1.1f * f
+            val ray = (if (long) 1f else 0.6f) * STAR_RAY_ALPHA * f * f * exp(-across * across / (2 * width * width))
+            rays = 1 - (1 - rays) * (1 - ray)
+        }
+        val half = STAR_GLOW_SIZE / 2
+        val edge = smooth((half - hypot(dx, dy)) / 16f)
+        return (1 - (1 - glow) * (1 - rays)).coerceIn(0f, 1f) * edge
+    }
+
+    private fun starGlowBitmap(): Bitmap {
+        val size = STAR_GLOW_PX
+        val k = STAR_GLOW_SIZE / size
+        val pixels = IntArray(size * size) {
+            val a = (starLight(((it % size) + 0.5f) * k - STAR_GLOW_SIZE / 2, ((it / size) + 0.5f) * k - STAR_GLOW_SIZE / 2) * 255).roundToInt()
+            if (a == 0) Color.TRANSPARENT else Color.argb(a, STAR_LIGHT[0], STAR_LIGHT[1], STAR_LIGHT[2])
+        }
+        return createBitmap(size, size).apply { setPixels(pixels, 0, size, 0, 0, size, size) }
+    }
+
+    /** The light of the star, screened over [image], as the animated face shows it at rest. */
+    private fun drawStarGlow(image: Rgb) {
+        val half = STAR_GLOW_SIZE / 2 * SCALE
+        val x0 = max(0, floor(STAR_X * SCALE - half).toInt())
+        val x1 = min(SIZE - 1, ceil(STAR_X * SCALE + half).toInt())
+        val y0 = max(0, floor(STAR_Y * SCALE - half).toInt())
+        val y1 = min(SIZE - 1, ceil(STAR_Y * SCALE + half).toInt())
+        for (y in y0..y1) for (x in x0..x1) {
+            val v = starLight((x + 0.5f) / SCALE - STAR_X, (y + 0.5f) / SCALE - STAR_Y)
+            if (v <= 0f) continue
+            val k = y * SIZE + x
+            image.r[k] = screen(image.r[k], STAR_LIGHT[0] * v)
+            image.g[k] = screen(image.g[k], STAR_LIGHT[1] * v)
+            image.b[k] = screen(image.b[k], STAR_LIGHT[2] * v)
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // Sky
     // ---------------------------------------------------------------------------------------------
 
@@ -436,11 +550,22 @@ class AuroraTownImages(
      * A 3 x 3 median first removes most faint stars. Then two clean-ups along the line: a stop of at
      * most 4 columns far above both sides is a star (removed), and a dip of at most 5 columns far below
      * both sides is a gap in the rock (closed).
+     *
+     * The gold star on the tree ([starCover]) is not a sky line: here the sky goes on behind it (each
+     * row of the star takes the brightness just above it), so the line runs down to the tree and the
+     * sky between the points of the star stays sky. The mask cuts the star out by itself.
      */
     private fun findHorizon(source: Rgb): FloatArray {
         val w = source.w
         val h = source.h
         val luma = FloatArray(w * h) { 0.3f * source.r[it] + 0.55f * source.g[it] + 0.15f * source.b[it] }
+        for (x in 0 until w) {
+            var above = -1f
+            for (y in 0 until h) {
+                val k = y * w + x
+                if (starCover[k] <= 0f) above = luma[k] else if (above >= 0f) luma[k] = above
+            }
+        }
         val median = luma.copyOf()
         val window = FloatArray(9)
         for (y in 1 until h - 1) for (x in 1 until w - 1) {
@@ -504,7 +629,7 @@ class AuroraTownImages(
             var sum = 0f
             for (sy in 0..1) for (sx in 0..1) {
                 var u = (i + 0.25f + 0.5f * sx) / OUT_PER_SOURCE
-                var v = (j + 0.25f + 0.5f * sy) / OUT_PER_SOURCE
+                var v = (j + 0.25f + 0.5f * sy) / OUT_PER_SOURCE - SHIFT_SOURCE
                 val d = hypot(u - c, v - c)
                 if (d > PHOTO_RIM) {
                     u = c + (u - c) * PHOTO_RIM / d
@@ -513,7 +638,10 @@ class AuroraTownImages(
                 val x = (u - 0.5f).coerceIn(0f, master.w - 1.001f)
                 val x0 = x.toInt()
                 val line = min(horizon[x0], horizon[x0 + 1]) - SKY_MARGIN
-                sum += ((line - v) / SKY_SOFT + 0.5f).coerceIn(0f, 1f)
+                // Not on the star, which stands in the sky
+                val y0 = (v - 0.5f).coerceIn(0f, master.h - 1.001f).toInt()
+                val star = max(max(starCover[y0 * master.w + x0], starCover[y0 * master.w + x0 + 1]), max(starCover[(y0 + 1) * master.w + x0], starCover[(y0 + 1) * master.w + x0 + 1]))
+                sum += ((line - v) / SKY_SOFT + 0.5f).coerceIn(0f, 1f) * (1 - star)
             }
             plane[j * SIZE + i] = sum / 4
         }
@@ -596,18 +724,27 @@ class AuroraTownImages(
         }
         drawMoon(image)
         drawLights(image)
+        drawStarGlow(image)
         return image
     }
 
-    /** The moon as a waxing crescent in the upper right, with a faint halo. */
+    /** The moon as a waxing crescent in the upper right, with the light of its lit part around it (see [AuroraTownMoonGlow]). */
     private fun drawMoon(image: Rgb) {
         val cx = MOON_X * SCALE
         val cy = MOON_Y * SCALE
         val size = (MOON_SIZE * SCALE).roundToInt()
-        val light = Rgb(SIZE, SIZE)
-        glow(light, cx, cy, size * 0.9f, 22f, floatArrayOf(0.75f, 0.85f, 1f))
-        glow(light, cx, cy, size * 0.45f, 18f, floatArrayOf(0.9f, 0.95f, 1f))
-        screenInto(image, light)
+        val limb = Math.toRadians(MOON_LIMB_ANGLE)
+        val glowColor = Color.parseColor(AuroraTownMoonGlow.COLOR)
+        val reach = ceil(AuroraTownMoonGlow.REACH * size / 2f).toInt() + 2
+        for (j in (cy - reach).toInt()..(cy + reach).toInt()) for (i in (cx - reach).toInt()..(cx + reach).toInt()) {
+            if (i !in 0 until SIZE || j !in 0 until SIZE) continue
+            val v = AuroraTownMoonGlow.lightAt(i + 0.5f - cx, j + 0.5f - cy, size / 2f, (1 - MOON_TERMINATOR) / 2, -sin(limb).toFloat(), -cos(limb).toFloat())
+            if (v <= 0f) continue
+            val k = j * SIZE + i
+            image.r[k] = screen(image.r[k], Color.red(glowColor) * v)
+            image.g[k] = screen(image.g[k], Color.green(glowColor) * v)
+            image.b[k] = screen(image.b[k], Color.blue(glowColor) * v)
+        }
         val photoBytes = moonPhotoFile.readBytes()
         val moonPhoto = requireNotNull(BitmapFactory.decodeByteArray(photoBytes, 0, photoBytes.size)) { "Cannot read $moonPhotoFile" }
         val moon = MoonPicture.draw(moonPhoto, size, MoonLight.Look(MOON_TERMINATOR, MOON_LIMB_ANGLE, 0.0))
@@ -896,9 +1033,15 @@ class AuroraTownImages(
         /** The size of the face pictures in pixels. */
         const val SIZE = 800
 
-        /** The centre of the tower clock, design coordinates. */
+        /**
+         * How far the photo is moved down on the face, design pixels. It makes room between the
+         * star on the tree and the glucose value above it.
+         */
+        const val PHOTO_SHIFT = 24f
+
+        /** The centre of the tower clock, design coordinates (198.8 in the photo, then the shift). */
         const val CLOCK_X = 82.6f
-        const val CLOCK_Y = 198.8f
+        const val CLOCK_Y = 198.8f + PHOTO_SHIFT
 
         /** The radius of the tower clock face, iron ring included, design coordinates. */
         const val CLOCK_RADIUS = 10f
@@ -910,10 +1053,29 @@ class AuroraTownImages(
         const val CRYSTAL_SMALL_PX = 48
         const val CRYSTAL_BIG_PX = 96
 
-        /** The moon (centre and size, design coordinates): upper right, away from the text area x 80..320, y 70..250. */
-        const val MOON_X = 336f
-        const val MOON_Y = 104f
-        const val MOON_SIZE = 30f
+        /**
+         * The moon (centre and size, design coordinates): upper right, right of the glucose arrow and
+         * below the time, about as wide as the church tower, and 8 pixels inside the round face.
+         */
+        const val MOON_X = 338f
+        const val MOON_Y = 100f
+        const val MOON_SIZE = 44f
+
+        /**
+         * The gold star on top of the tree, design coordinates: its middle, and its size from point to
+         * point (the circle through its five points). Measured in the mirrored master: middle (511.5, 428),
+         * points 66.4 source pixels from the middle, the top point at y 362.
+         */
+        const val STAR_X = 199.8f
+        const val STAR_Y = 167.2f + PHOTO_SHIFT
+        const val STAR_SIZE = 51.9f
+
+        /** The top point of the star, design coordinates: the glucose value must stay above it. */
+        const val STAR_TOP = STAR_Y - STAR_SIZE / 2
+
+        /** The picture of the light of the star ([starGlow]): its size in design pixels and in pixels. */
+        const val STAR_GLOW_SIZE = 128f
+        const val STAR_GLOW_PX = 192
 
         /** The byte budgets. */
         const val BACKGROUND_BUDGET = 150_000
@@ -923,7 +1085,9 @@ class AuroraTownImages(
          * The bulbs of the light strings along the eaves of the chalets, design coordinates. Per
          * string, from the top of the gable down; the strings go from left to right. They were found
          * in the mirrored master as small bright points along each eave (brighter than the ring around
-         * them, warm, not inside a window) and checked on the debug picture.
+         * them, warm, not inside a window) and checked on the debug picture. The numbers are places in
+         * the photo; [PHOTO_SHIFT] is added to y. The end of the string left of the tree is left out:
+         * the bigger tree hides it. So are the bulbs that the shift moves to the very edge of the face.
          */
         val EAVE_LIGHTS: List<Pair<Float, Float>> = floatArrayOf(
             51.0f, 219.3f, 49.0f, 222.5f, 46.7f, 222.9f, 47.1f, 225.6f, 44.7f, 225.6f, 44.3f, 227.9f, 42.8f, 230.7f, 40.0f, 229.9f,
@@ -939,7 +1103,7 @@ class AuroraTownImages(
             129.1f, 270.5f, 128.7f, 272.5f, 130.7f, 273.2f, 130.7f, 275.2f, 132.6f, 276.4f, 131.1f, 278.3f, 133.0f, 279.5f, 134.2f, 281.8f,
             135.4f, 283.4f, 136.5f, 285.0f, 152.5f, 259.6f, 150.6f, 260.4f, 149.0f, 263.1f, 147.9f, 265.4f, 145.5f, 267.4f, 143.6f, 268.6f,
             142.0f, 270.5f, 140.4f, 272.1f, 139.3f, 274.0f, 154.5f, 261.9f, 154.9f, 263.9f, 156.8f, 266.6f, 158.0f, 269.7f, 159.6f, 271.3f,
-            160.4f, 274.0f, 161.9f, 276.0f, 164.6f, 279.9f, 165.4f, 282.6f, 167.0f, 284.6f, 168.2f, 286.1f, 169.3f, 288.9f, 260.4f, 250.2f,
+            160.4f, 274.0f, 260.4f, 250.2f,
             258.0f, 252.5f, 257.6f, 254.5f, 256.8f, 256.8f, 254.9f, 261.1f, 253.7f, 263.1f, 252.1f, 264.3f, 252.9f, 266.2f, 251.8f, 268.2f,
             249.8f, 271.7f, 248.2f, 274.0f, 247.9f, 276.0f, 246.7f, 277.9f, 245.1f, 281.8f, 243.9f, 283.8f, 244.3f, 286.1f, 261.5f, 252.5f,
             263.5f, 254.5f, 265.8f, 252.5f, 265.0f, 255.7f, 266.6f, 256.8f, 265.0f, 258.4f, 268.2f, 258.8f, 269.7f, 261.1f, 269.7f, 263.1f,
@@ -951,15 +1115,16 @@ class AuroraTownImages(
             307.6f, 271.7f, 305.7f, 272.1f, 334.6f, 214.6f, 336.9f, 216.6f, 339.3f, 219.3f, 340.0f, 222.5f, 343.2f, 223.2f, 343.6f, 226.4f,
             345.9f, 225.2f, 347.1f, 228.3f, 349.4f, 227.9f, 349.8f, 231.4f, 351.8f, 231.4f, 354.5f, 233.4f, 356.8f, 235.0f, 358.8f, 238.1f,
             363.1f, 241.6f, 366.6f, 244.7f, 370.1f, 249.0f, 370.1f, 252.5f, 373.6f, 252.5f
-        ).toList().chunked(2) { it[0] to it[1] }
+        ).toList().chunked(2) { it[0] to it[1] + PHOTO_SHIFT }.filter { (x, y) -> hypot(x - 200f, y - 200f) < 198f }
 
         /**
-         * The outline of the tree in the source photo after the mirror (1024 x 1024): rows of
-         * (y, centre x, half width), from the top down.
+         * The outline of the tree in the source photo after the mirror (1024 x 1024, before the
+         * shift): rows of (y, centre x, half width), from the top down, just inside the branches.
          */
         private val TREE_OUTLINE: List<Triple<Float, Float, Float>> = listOf(
-            Triple(600f, 512f, 4f), Triple(620f, 512f, 16f), Triple(670f, 511f, 42f), Triple(720f, 513f, 62f),
-            Triple(770f, 514f, 77f), Triple(820f, 513f, 90f), Triple(855f, 512f, 99f)
+            Triple(488f, 510f, 8f), Triple(500f, 509f, 20f), Triple(520f, 509f, 32f), Triple(560f, 509f, 49f),
+            Triple(600f, 507f, 60f), Triple(640f, 507f, 73f), Triple(680f, 507f, 85f), Triple(720f, 509f, 98f),
+            Triple(760f, 508f, 106f), Triple(800f, 506f, 116f), Triple(845f, 508f, 124f)
         )
 
         /**
@@ -977,10 +1142,10 @@ class AuroraTownImages(
             Color.rgb(255, 214, 160), Color.rgb(80, 140, 255), Color.rgb(255, 214, 160), Color.rgb(90, 230, 110)
         )
 
-        private const val TREE_TURNS = 6
-        private const val TREE_TOP = 607f
-        private const val TREE_BOTTOM = 846f
-        private const val TREE_LIGHT_STEP = 9.5f
+        private const val TREE_TURNS = 8
+        private const val TREE_TOP = 498f
+        private const val TREE_BOTTOM = 838f
+        private const val TREE_LIGHT_STEP = 10.5f
 
         private fun treeOutlineAt(y: Float): Pair<Float, Float> {
             val rows = TREE_OUTLINE
@@ -1010,7 +1175,7 @@ class AuroraTownImages(
                 // The garland hangs a little: lower in the middle of the front
                 val front = cos(theta).toFloat()
                 val x = cx + half * 0.86f * sin(theta).toFloat()
-                val yy = y + 6f * front
+                val yy = y + 8f * front
                 if (!lastX.isNaN()) travelled += hypot(x - lastX, yy - lastY)
                 lastX = x
                 lastY = yy
@@ -1018,7 +1183,7 @@ class AuroraTownImages(
                     travelled = 0f
                     val jx = (random.nextGaussian() * 1.2).toFloat()
                     val jy = (random.nextGaussian() * 1.2).toFloat()
-                    out += ((x + jx + 0.5f) * DESIGN_PER_SOURCE).round1() to ((yy + jy + 0.5f) * DESIGN_PER_SOURCE).round1()
+                    out += ((x + jx + 0.5f) * DESIGN_PER_SOURCE).round1() to ((yy + jy + 0.5f) * DESIGN_PER_SOURCE + PHOTO_SHIFT).round1()
                 }
                 theta += 0.004
             }
@@ -1033,12 +1198,18 @@ class AuroraTownImages(
         /** Design units per source pixel (400 / 1024). */
         private const val DESIGN_PER_SOURCE = 400f / 1024f
 
+        /** [PHOTO_SHIFT] in source pixels. */
+        private const val SHIFT_SOURCE = PHOTO_SHIFT / DESIGN_PER_SOURCE
+
         /** Points of the source photo further than this from the centre take the colour at this radius. */
         private const val PHOTO_RIM = 504f
 
+        /** The blur (source pixels) of the colours beyond the edge of the photo. */
+        private const val RIM_BLUR = 3
+
         /** The small clock on the side of the tower, in 800 pixels: centre and half axes. */
         private const val SIDE_CLOCK_X = 263.5f * OUT_PER_SOURCE
-        private const val SIDE_CLOCK_Y = 518f * OUT_PER_SOURCE
+        private const val SIDE_CLOCK_Y = (518f + SHIFT_SOURCE) * OUT_PER_SOURCE
         private const val SIDE_CLOCK_RX = 4.7f
         private const val SIDE_CLOCK_RY = 18.6f
 
@@ -1062,6 +1233,13 @@ class AuroraTownImages(
         private const val SKY_MARGIN = 0.5f
         private const val SKY_SOFT = 1.6f
 
+        /**
+         * The star in the sky mask: the inner corners of the star (part of its radius), and how much
+         * bigger than the gold star it is cut out of the sky (source pixels).
+         */
+        private const val STAR_INNER = 0.38f
+        private const val STAR_MASK_MARGIN = 2.5f
+
         /** The aurora: vertical stretch, shift (source rows), saturation and gain. */
         private const val AURORA_STRETCH = 1f
         private const val AURORA_SHIFT = 80f
@@ -1077,6 +1255,19 @@ class AuroraTownImages(
 
         private val WARM_WHITE = floatArrayOf(1f, 0.78f, 0.48f)
         private val WARM_CORE = floatArrayOf(1f, 0.95f, 0.85f)
+
+        /**
+         * The light of the star (see `starLight`): its colour, the strength of the glow round it and of
+         * its wide skirt, the number of rays, their strength, and how long the long and the short rays
+         * are, in star radii.
+         */
+        private val STAR_LIGHT = intArrayOf(255, 222, 160)
+        private const val STAR_GLOW_CORE = 0.6f
+        private const val STAR_GLOW_SKIRT = 0.2f
+        private const val STAR_RAYS = 10
+        private const val STAR_RAY_ALPHA = 0.9f
+        private const val STAR_RAY_LONG = 2.35f
+        private const val STAR_RAY_SHORT = 1.45f
 
         private const val SNOW_COUNT = 70
         private const val SNOW_SUPER = 2

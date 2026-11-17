@@ -32,7 +32,11 @@ import app.aaps.wear.watchfaces.animation.WakeAnimationSpec
 import app.aaps.wear.watchfaces.animation.WakeAnimator
 import app.aaps.wear.watchfaces.animation.WakeTimer
 import app.aaps.wear.watchfaces.animation.allLayers
+import app.aaps.wear.watchfaces.daynight.DayNightClock
 import app.aaps.wear.watchfaces.daynight.DayOverlay
+import app.aaps.wear.watchfaces.daynight.GeoPoint
+import app.aaps.wear.watchfaces.daynight.MoonLight
+import app.aaps.wear.watchfaces.daynight.MoonPhase
 import app.aaps.wear.watchfaces.daynight.MoonPicture
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
@@ -44,11 +48,15 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
@@ -288,6 +296,8 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
                 scaleY = "1 + env*0.05*sin(t*0.33 + 1)"
             )
         )
+        // The light of the moon around it, behind the moon view
+        layers.put(moonGlowLayer())
         // The lights on the eaves: a gentle twinkle while it plays, steady at rest
         layers.put(lightsLayer(AuroraTownImages.EAVE_LIGHTS, EAVE_COLOR, TWINKLE))
         // The tree: one layer per colour; the warm white ones twinkle, the coloured ones chase each other
@@ -298,6 +308,9 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
             val alpha = if (warm) TWINKLE else "if(env > 0.01, mix(1, step(0.5, fract(t*0.7 + ${chase++}*0.25)), env), 1)"
             layers.put(lightsLayer(indices.map { AuroraTownImages.TREE_LIGHTS[it] }, hex(color), alpha))
         }
+        // The star on the tree, over its lights: lit and steady at rest; while it plays the rays turn
+        // slowly and the light sparkles. All motion is scaled by env, so the start and the end are the rest.
+        layers.put(starLayer())
         // Snow, only while it plays: soft flakes and small crystals blown from left to right, and one big crystal
         layers.put(
             JSONObject().put("shape", "dot").put("colors", JSONArray().put(SNOW_COLOR)).put("slot", "front")
@@ -323,6 +336,40 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         return JSONObject().put("durationMs", ANIMATION_MS).put("fps", 24).put("fadeMs", FADE_MS).put("layers", layers)
     }
 
+    /**
+     * The light of the moon ([AuroraTownMoonGlow]): one picture in the back slot that stays on the face
+     * (`rest`), so the moon view is drawn over it. It follows the moon of tonight through two values of
+     * the watch: `moon_phase` (0 new, 0.25 first quarter, 0.5 full) for how much is lit and on which side,
+     * and `moon_cycle` (0 moonrise, 0.25 high in the sky, 0.5 moonset) for how the moon is turned in the
+     * sky. A mask keeps it out of the disc, so the dark part of the moon stays dark.
+     */
+    private fun moonGlowLayer(): JSONObject {
+        val glow = AuroraTownMoonGlow
+        val r = AuroraTownImages.MOON_SIZE / 2f
+        val reach = glow.REACH * r
+        val around = rect(AuroraTownImages.MOON_X - reach, AuroraTownImages.MOON_Y - reach, 2 * reach, 2 * reach)
+        // How much of the moon is lit (glow.strength, glow.scale and glow.shift, as formulas)
+        val lit = "(1-cos(2*pi*v_moon_phase))/2"
+        // The lit side: right while the moon grows, left while it shrinks (seen from the north), turned
+        // with the moon over the sky: about 35 degrees up when it rises, 35 degrees down when it sets.
+        // The watch turns its picture of the moon the same way, to within about 20 degrees (38 at most).
+        val away = "sign(0.5-v_moon_phase)*${round1((glow.LIT_SHIFT * r).toFloat())}*(1-$lit)"
+        val turn = "$MOON_TURN*cos(2*pi*v_moon_cycle)"
+        return JSONObject().put("image", MOON_HALO).put("rect", around).put("slot", "back").put("blend", "screen").put("rest", 0)
+            .put("x", "$away*cos($turn)").put("y", "-$away*sin($turn)")
+            .put("scale", "${glow.NEW_SCALE}+${round2(1 - glow.NEW_SCALE)}*$lit").put("alpha", "${glow.FULL_STRENGTH}*pow($lit, ${glow.GROWTH})")
+            .put("clip", JSONObject().put("mask", MOON_HOLE).put("maskRect", around))
+    }
+
+    /** The light of the star ([AuroraTownImages.starGlow]), screened over the gold star of the photo. */
+    private fun starLayer(): JSONObject {
+        val half = AuroraTownImages.STAR_GLOW_SIZE / 2
+        return JSONObject().put("image", STAR_GLOW)
+            .put("rect", rect(round1(AuroraTownImages.STAR_X - half).toFloat(), round1(AuroraTownImages.STAR_Y - half).toFloat(), 2 * half, 2 * half))
+            .put("slot", "back").put("blend", "screen").put("rest", 0)
+            .put("rotation", STAR_TURN).put("scale", STAR_BREATH).put("alpha", STAR_SPARKLE)
+    }
+
     private fun auroraLayer(image: String, alpha: String, x: String, y: String, scaleY: String): JSONObject = JSONObject()
         .put("image", image).put("rect", rect(0f, 0f, 400f, 400f)).put("slot", "back").put("blend", "screen")
         .put("slices", AURORA_SLICES).put("clip", JSONObject().put("mask", SKY_MASK)).put("rest", 0)
@@ -337,6 +384,8 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
 
     /** One decimal is enough for a light, and keeps the json short. */
     private fun round1(v: Float): Double = (v * 10f).roundToInt() / 10.0
+
+    private fun round2(v: Double): Double = Math.round(v * 100) / 100.0
 
     private fun hex(color: Int) = String.format("#%06X", color and 0xFFFFFF)
 
@@ -356,7 +405,10 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
             AURORA_MIRRORED to pictures.auroraMirrored(),
             SKY_MASK to pictures.skyMask(),
             CRYSTAL_SMALL to pictures.crystalSmall(),
-            CRYSTAL_BIG to pictures.crystalBig()
+            CRYSTAL_BIG to pictures.crystalBig(),
+            MOON_HALO to AuroraTownMoonGlow.haloPng(),
+            MOON_HOLE to AuroraTownMoonGlow.holePng(),
+            STAR_GLOW to pictures.starGlow()
         ) else common + mapOf(
             ResFileMap.BACKGROUND.fileName to pictures.stockBackground(),
             ResFileMap.SECOND_HAND.fileName to pictures.secondHandSnow()
@@ -448,9 +500,14 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         LocalDateTime.of(2026, 12, 24, hour, minute, second).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     /** A face that shows the design at [instant] with [sample], drawn once, so its views are laid out. */
-    private fun face(instant: Long, sample: Sample = sample(), change: (JSONObject) -> Unit = {}): Pair<CustomWatchface, Bitmap> {
+    private fun face(instant: Long, sample: Sample = sample(), place: GeoPoint? = null, change: (JSONObject) -> Unit = {}): Pair<CustomWatchface, Bitmap> {
         val design = design(default).also(change)
         val face = storedFace(design, default, images(), instant)
+        // The place the phone sent last, which turns the moon as it stands in the sky there
+        place?.let {
+            face.sp.putDouble(R.string.key_location_latitude, it.latitude)
+            face.sp.putDouble(R.string.key_location_longitude, it.longitude)
+        }
         // A face for a picture fills the hour and minute views with the time of now, not with the time
         // it is drawn for: here every time text is for [instant], as on the watch at that moment
         val real = face.dateUtil
@@ -490,11 +547,11 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
      * The frames of the wake animation at [atMs] (in order), drawn by the views of a sample face and a
      * [WakeAnimator] with a test clock; null where the face is drawn the normal way again.
      */
-    private fun wakeFrames(atMs: List<Long>, instant: Long = PREVIEW_MS): Map<Long, Bitmap?> {
+    private fun wakeFrames(atMs: List<Long>, instant: Long = PREVIEW_MS, place: GeoPoint? = null): Map<Long, Bitmap?> {
         val design = design(default)
-        val (face, _) = face(instant)
+        val (face, _) = face(instant, place = place)
         var clock = 0L
-        val animator = WakeAnimator(heartRate = { 72 }, timer = WakeTimer { clock })
+        val animator = WakeAnimator(heartRate = { 72 }, value = { key -> moonValue(key, instant, place) }, timer = WakeTimer { clock })
         animator.setDesign(readAnimation(design))
         return atMs.associateWith { ms ->
             clock = ms
@@ -682,7 +739,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         val pictures = mutableListOf<Pair<String, Bitmap>>()
         for ((mgdl, level, color) in listOf(Triple(120.0, 0L, MID_COLOR), Triple(65.0, -1L, LOW_COLOR), Triple(187.0, 1L, HIGH_COLOR), Triple(400.0, 1L, HIGH_COLOR))) {
             val sample = sample(mgdl, level)
-            val (face, picture) = face(PREVIEW_MS, sample, ::withoutSnow)
+            val (face, picture) = face(PREVIEW_MS, sample, change = ::withoutSnow)
             pictures += sample.text to picture
             val cap = face.textOf(R.id.freetext1).text.toString()
             val value = face.textOf(R.id.sgv).text.toString()
@@ -715,7 +772,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         assertThat(locale.language).isEqualTo("nl")
         val sample = sample(120.0)
         assertThat(sample.text).isEqualTo("6,7")
-        val (face, picture) = face(PREVIEW_MS, sample, ::withoutSnow)
+        val (face, picture) = face(PREVIEW_MS, sample, change = ::withoutSnow)
         assertThat(face.textOf(R.id.freetext1).text.toString()).isEqualTo("6,7")
         val sgv = sgvBox()
         val left = sgv.right - Paint().apply { textSize = SGV_SIZE.toFloat(); typeface = baseFace }.measureText("6,7").roundToInt()
@@ -743,6 +800,12 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         for (value in listOf("22,2", "22.2", "10,4", "400")) assertWithMessage(value).that(paint.measureText(value)).isAtMost(sgv.width().toFloat())
         // The time and the glucose with its snow do not touch
         assertThat(time.bottom).isLessThan(inkRect("88", SGV_SIZE, sgv.right, sgv.top).top - MIN_GAP)
+        // The glucose, its comma too, stays clear above the top point of the star on the tree
+        for (value in listOf("22,2", "400", "10,4", "6,7")) {
+            val bottom = inkRect(value, SGV_SIZE, sgv.right, sgv.top).bottom
+            println("$fileName glucose $value bottom $bottom, star top ${AuroraTownImages.STAR_TOP}")
+            assertWithMessage("$value above the star").that(bottom.toFloat()).isAtMost(AuroraTownImages.STAR_TOP - STAR_GAP)
+        }
         // The hands turn about the middle of the church clock
         val hand = rectOf(design.getJSONObject("hour_hand"))
         assertThat(hand.centerX()).isWithin(0.5f).of(AuroraTownImages.CLOCK_X)
@@ -792,7 +855,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         cells += "rest" to rest
         sheet(cells, "${fileName}_wake.png")
         // The tree and a house, bigger, to see the lights blink
-        sheet(cells.map { (name, picture) -> name to Bitmap.createBitmap(picture, 150, 200, 110, 110) }, "${fileName}_tree.png")
+        sheet(cells.map { (name, picture) -> name to Bitmap.createBitmap(picture, 135, 135, 130, 130) }, "${fileName}_tree.png")
         // It plays for its whole length, then the face is drawn the normal way
         for (ms in times.dropLast(1)) assertWithMessage("$ms ms").that(frames[ms]).isNotNull()
         assertThat(frames[15_000L]).isNull()
@@ -812,6 +875,113 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         }
     }
 
+    /** The moon values the watch gives the layers ([key] `moon_phase` or `moon_cycle`) at [instant] in [place], worked out as the watch does. */
+    private fun moonValue(key: String, instant: Long, place: GeoPoint?): Double? = when (key) {
+        "moon_phase" -> MoonPhase.at(instant)
+        "moon_cycle" -> DayNightClock(location = { place }).moonCycle(instant)
+        else         -> null
+    }
+
+    /** The first hour from 1 December 2026 within 40 days whose moon phase is nearest to [phase], with the moon high in the sky if it can be. */
+    private fun momentOf(phase: Double, place: GeoPoint): Long {
+        val clock = DayNightClock(location = { place })
+        val start = LocalDateTime.of(2026, 12, 1, 0, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        return (0 until 40 * 24).map { start + it * 3_600_000L }.minBy { t ->
+            val p = MoonPhase.at(t)
+            val dp = minOf(abs(p - phase), 1 - abs(p - phase))
+            dp * 20 + abs(clock.moonCycle(t) - 0.32)
+        }
+    }
+
+    /** The lit side of the moon on the screen (degrees, x right, y down) as the watch draws it, and as the glow layer guesses it. */
+    private fun litDirections(t: Long, place: GeoPoint): Pair<Double, Double> {
+        val limb = Math.toRadians(MoonLight.at(t, place).limbAngle)
+        val real = Math.toDegrees(atan2(-cos(limb), -sin(limb)))
+        val side = if (MoonPhase.at(t) < 0.5) 1.0 else -1.0
+        val turn = MOON_TURN * cos(2 * Math.PI * moonValue("moon_cycle", t, place)!!)
+        return real to Math.toDegrees(atan2(-side * sin(turn), side * cos(turn)))
+    }
+
+    /** The design without the light of the moon, to compare. */
+    private fun withoutMoonGlow(design: JSONObject) {
+        val layers = design.getJSONObject(WakeAnimationSpec.JSON_KEY).getJSONArray("layers")
+        for (i in layers.length() - 1 downTo 0) if (layers.getJSONObject(i).optString("image") == MOON_HALO) layers.remove(i)
+    }
+
+    /** The mean luminance that [glow] adds to [bare] over the pixels of [r] that [where] picks, and the largest change of one colour. */
+    private fun added(glow: Bitmap, bare: Bitmap, r: Rect, where: (Int, Int) -> Boolean): Pair<Double, Int> {
+        var sum = 0.0
+        var n = 0
+        var most = 0
+        for (y in r.top until r.bottom) for (x in r.left until r.right) {
+            if (x !in 0 until 400 || y !in 0 until 400 || !where(x, y)) continue
+            val a = glow.getPixel(x, y)
+            val b = bare.getPixel(x, y)
+            sum += luminance(a) - luminance(b)
+            n++
+            most = maxOf(most, abs(Color.red(a) - Color.red(b)), abs(Color.green(a) - Color.green(b)), abs(Color.blue(a) - Color.blue(b)))
+        }
+        return (if (n > 0) sum / n else 0.0) to most
+    }
+
+    @Test
+    fun theMoonGlowsWithItsPhase() {
+        assumeTrue(animated)
+        val place = GeoPoint(52.09, 5.12) // the Netherlands
+        // The glow guesses the lit side from two values; over two months of hours with the moon up it is
+        // never far from the side the watch lights
+        val start = at(0, 0)
+        val errors = (0 until 60 * 24).map { start + it * 3_600_000L }
+            .filter { moonValue("moon_cycle", it, place)!! < 0.5 && MoonLight.at(it, place).litFraction in 0.03..0.97 }
+            .map { t -> litDirections(t, place).let { (real, guess) -> abs(((real - guess) % 360 + 540) % 360 - 180) } }.sorted()
+        println("$fileName moon glow, error of the lit side over ${errors.size} hours: median ${errors[errors.size / 2]}, 90 % ${errors[(errors.size * 0.9).toInt()]}, max ${errors.last()}")
+        assertThat(errors.last()).isLessThan(45.0)
+
+        val r = AuroraTownImages.MOON_SIZE / 2f
+        val cx = AuroraTownImages.MOON_X
+        val cy = AuroraTownImages.MOON_Y
+        val half = (AuroraTownMoonGlow.REACH * r + 6).roundToInt()
+        val zoom = Rect((cx - half).roundToInt(), (cy - half).roundToInt(), (cx + half).roundToInt(), (cy + half).roundToInt())
+        fun crop(b: Bitmap) = Rect(zoom).let { it.intersect(0, 0, 400, 400); Bitmap.createBitmap(b, it.left, it.top, it.width(), it.height()) }
+        fun distance(x: Int, y: Int) = sqrt((x + 0.5f - cx) * (x + 0.5f - cx) + (y + 0.5f - cy) * (y + 0.5f - cy)) / r
+        val phases = listOf("new" to 0.0, "thin waxing" to 0.07, "first quarter" to 0.25, "waxing gibbous" to 0.38, "full" to 0.5, "waning crescent" to 0.88)
+        val cells = mutableListOf<Pair<String, Bitmap>>()
+        val ringGain = HashMap<String, Double>()
+        for ((name, phase) in phases) {
+            val t = momentOf(phase, place)
+            val (_, rest) = face(t, place = place)
+            val (_, bare) = face(t, place = place, change = ::withoutMoonGlow)
+            val wake = wakeFrames(listOf(0L, PREVIEW_WAKE_MS), t, place).getValue(PREVIEW_WAKE_MS)!!
+            cells += "$name" to rest
+            cells += "$name: no glow" to crop(bare)
+            cells += "$name: glow" to crop(rest)
+            cells += "$name: wake" to crop(wake)
+            // Nothing glows inside the disc: the dark part stays as dark as without the glow
+            val (_, inside) = added(rest, bare, zoom) { x, y -> distance(x, y) < 0.9f }
+            assertWithMessage("$name: change inside the disc").that(inside).isAtMost(2)
+            // The texts are not touched; at most a trace of light reaches the sky beside the tip of the arrow
+            for (box in listOf(timeBox(), sgvBox())) assertWithMessage("$name: change in $box").that(added(rest, bare, box) { _, _ -> true }.second).isAtMost(2)
+            val nearArrow = added(rest, bare, arrowBox()) { _, _ -> true }.second
+            println("$fileName moon glow $name: most change beside the arrow $nearArrow")
+            assertWithMessage("$name: change beside the arrow").that(nearArrow).isAtMost(MAX_GLOW_BY_TEXT)
+            // Around the disc it glows with the lit part, the most on the lit side
+            ringGain[name] = added(rest, bare, zoom) { x, y -> distance(x, y) in 1.1f..1.6f }.first
+            val litAngle = Math.toRadians(litDirections(t, place).first)
+            fun gainAt(sign: Int): Double = added(rest, bare, zoom) { x, y ->
+                val px = cx + sign * 1.3f * r * cos(litAngle).toFloat()
+                val py = cy + sign * 1.3f * r * sin(litAngle).toFloat()
+                (x + 0.5f - px) * (x + 0.5f - px) + (y + 0.5f - py) * (y + 0.5f - py) < 9f
+            }.first
+            println("$fileName moon glow $name: ${Instant.ofEpochMilli(t)}, lit ${MoonLight.at(t, place).litFraction}, around ${ringGain[name]}, lit side ${gainAt(1)}, dark side ${gainAt(-1)}")
+            if (phase != 0.0 && phase != 0.5) assertWithMessage("$name: lit side brighter").that(gainAt(1)).isGreaterThan(gainAt(-1))
+        }
+        sheet(cells, "aurora/moon-glow.png", cols = 4)
+        assertThat(ringGain.getValue("new")).isLessThan(0.002)
+        assertThat(ringGain.getValue("full")).isGreaterThan(ringGain.getValue("first quarter"))
+        assertThat(ringGain.getValue("first quarter")).isGreaterThan(ringGain.getValue("thin waxing"))
+        assertThat(ringGain.getValue("thin waxing")).isGreaterThan(0.0)
+    }
+
     protected companion object {
 
         private val PICTURES by lazy { AuroraTownImages() }
@@ -821,15 +991,19 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         const val CAP_FONT = SnowCapFont.CAP_NAME
         const val CUT_FONT = SnowCapFont.CUT_NAME
 
-        /** The time: its size, where the middle of its digits lies, the extra width of the view and the extra room of the cap views. */
+        /**
+         * The time: its size, where the middle of its digits lies, the extra width of the view and the
+         * extra room of the cap views. The time and the glucose sit high, to keep room above the star
+         * on the tree ([STAR_GAP]).
+         */
         const val TIME_SIZE = 48
-        const val TIME_MIDDLE = 62f
+        const val TIME_MIDDLE = 58f
         const val TIME_SLACK = 2
         const val CAP_ROOM = 12
 
         /** The glucose value: its size, the middle of its digits, and where it may lie (it ends at [SGV_RIGHT]). */
         const val SGV_SIZE = 72
-        const val BG_MIDDLE = 127f
+        const val BG_MIDDLE = 118f
         const val SGV_LEFT = 104
         const val SGV_RIGHT = 254
         const val ARROW_SIZE = 44
@@ -863,17 +1037,30 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         const val SHADE_VIEW = "cover_chart"
 
         /** The shade: where, how dark in its middle (0 to 255), and how much of it is fully dark (0 to 1 of its radius). */
-        val SHADE_BOX = Rect(76, 20, 324, 178)
+        val SHADE_BOX = Rect(76, 17, 324, 175)
         const val SHADE_ALPHA = 110f
         const val SHADE_CORE = 0.45f
 
         /** The spire and the tower of the church, and the moon, in design coordinates: no text there. */
-        val SPIRE = Rect(72, 128, 104, 172)
-        val TOWER = Rect(60, 170, 112, 260)
-        val MOON = Rect(319, 87, 353, 121)
+        val SPIRE = Rect(72, 128 + AuroraTownImages.PHOTO_SHIFT.toInt(), 104, 172 + AuroraTownImages.PHOTO_SHIFT.toInt())
+        val TOWER = Rect(60, 170 + AuroraTownImages.PHOTO_SHIFT.toInt(), 112, 260 + AuroraTownImages.PHOTO_SHIFT.toInt())
+        val MOON: Rect = (AuroraTownImages.MOON_SIZE / 2f).let { r ->
+            Rect((AuroraTownImages.MOON_X - r).roundToInt(), (AuroraTownImages.MOON_Y - r).roundToInt(), (AuroraTownImages.MOON_X + r).roundToInt(), (AuroraTownImages.MOON_Y + r).roundToInt())
+        }
 
         /** The least room between the time and the snow on the glucose value. */
         const val MIN_GAP = 4
+
+        /** The least room between the lowest ink of the glucose value (its comma) and the top point of the star. */
+        const val STAR_GAP = 8f
+
+        /**
+         * The light of the star on the tree while the wake plays: its rays turn a little to and fro, it
+         * breathes a little and sparkles. At rest (env 0) it is still and full.
+         */
+        const val STAR_TURN = "env*14*sin(t*0.42)"
+        const val STAR_BREATH = "1 + env*0.05*sin(t*1.9)"
+        const val STAR_SPARKLE = "1 - env*0.35*noise(t*2.6)*(0.6+0.4*sin(t*7.3))"
 
         /** The pictures in the zip. */
         const val AURORA = "Aurora"
@@ -881,6 +1068,15 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         const val SKY_MASK = "SkyMask"
         const val CRYSTAL_SMALL = "CrystalSmall"
         const val CRYSTAL_BIG = "CrystalBig"
+        const val MOON_HALO = "MoonHalo"
+        const val MOON_HOLE = "MoonHole"
+        const val STAR_GLOW = "StarGlow"
+
+        /** How far the moon turns its lit side from rise to high in the sky, in radians (about 35 degrees in the Netherlands). */
+        const val MOON_TURN = 0.6
+
+        /** The most the light of the moon may change one colour (of 255) in the box of the arrow, the text nearest to the moon. */
+        const val MAX_GLOW_BY_TEXT = 8
 
         /** The wake animation. */
         const val ANIMATION_MS = 15_000L

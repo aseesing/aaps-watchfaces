@@ -41,6 +41,7 @@ class AuroraTownImagesTest {
             "SecondHandSnow.png" to images.secondHandSnow(),
             "HourHand.png" to images.hourHand(),
             "MinuteHand.png" to images.minuteHand(),
+            "StarGlow.png" to images.starGlow(),
             "debug-mask.png" to images.debugMask(),
             "debug-lights.png" to images.debugLights()
         )
@@ -50,6 +51,7 @@ class AuroraTownImagesTest {
             appendLine("jpg quality: ${images.jpgQualities()}")
             appendLine("clock: x=${AuroraTownImages.CLOCK_X} y=${AuroraTownImages.CLOCK_Y} r=${AuroraTownImages.CLOCK_RADIUS}")
             appendLine("eave lights: ${AuroraTownImages.EAVE_LIGHTS.size}, tree lights: ${AuroraTownImages.TREE_LIGHTS.size}")
+            appendLine("star: x=${AuroraTownImages.STAR_X} y=${AuroraTownImages.STAR_Y} size=${AuroraTownImages.STAR_SIZE} top=${AuroraTownImages.STAR_TOP}")
         }
         File(out, "sizes.txt").writeText(report)
         println(report)
@@ -60,6 +62,7 @@ class AuroraTownImagesTest {
         assertWithMessage("aurora mirrored").that(files.getValue("AuroraMirrored.jpg").size).isAtMost(40_000)
         assertWithMessage("sky mask").that(files.getValue("SkyMask.png").size).isAtMost(15_000)
         assertWithMessage("snow").that(files.getValue("SecondHandSnow.png").size).isAtMost(40_000)
+        assertWithMessage("star glow").that(files.getValue("StarGlow.png").size).isAtMost(25_000)
 
         // The sky mask: full high in the middle, empty on the ground
         val mask = BitmapFactory.decodeByteArray(files.getValue("SkyMask.png"), 0, files.getValue("SkyMask.png").size)
@@ -68,6 +71,9 @@ class AuroraTownImagesTest {
         assertThat(Color.alpha(mask.getPixel(400, 700))).isEqualTo(0)
         // Not on the tower clock
         assertThat(Color.alpha(mask.getPixel((AuroraTownImages.CLOCK_X * 2).toInt(), (AuroraTownImages.CLOCK_Y * 2).toInt()))).isEqualTo(0)
+        // Not on the star: its middle, and a little below its top point
+        assertThat(Color.alpha(mask.getPixel((AuroraTownImages.STAR_X * 2).toInt(), (AuroraTownImages.STAR_Y * 2).toInt()))).isEqualTo(0)
+        assertThat(Color.alpha(mask.getPixel((AuroraTownImages.STAR_X * 2).toInt(), ((AuroraTownImages.STAR_TOP + 4) * 2).toInt()))).isEqualTo(0)
 
         // The light points lie on the face and below the sky
         for ((x, y) in AuroraTownImages.EAVE_LIGHTS + AuroraTownImages.TREE_LIGHTS) {

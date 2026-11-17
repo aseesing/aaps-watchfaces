@@ -332,11 +332,10 @@ abstract class CwfDesignBase {
 
     protected fun pngBytes(bitmap: Bitmap): ByteArray = ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
 
-    /** A grid of labelled previews, three per row. */
-    protected fun sheet(cells: List<Pair<String, Bitmap>>, fileName: String) {
+    /** A grid of labelled previews, [cols] per row. */
+    protected fun sheet(cells: List<Pair<String, Bitmap>>, fileName: String, cols: Int = 3) {
         val cell = 300
         val label = 26
-        val cols = 3
         val rows = (cells.size + cols - 1) / cols
         val sheet = createBitmap(cols * cell, rows * (cell + label)).apply { eraseColor(Color.parseColor("#15151F")) }
         val canvas = Canvas(sheet)
