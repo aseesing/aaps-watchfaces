@@ -72,8 +72,17 @@ tasks.withType<Test>().configureEach {
     // The design tests read a picture of AAPS (the moon photo of the watch)
     systemProperty("aaps.dir", aapsDir.path)
     maxHeapSize = "3g"
+    // The designs render on the CPU and do not share files: run several test classes at once
+    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 3).coerceIn(1, 4)
     // The design tests are not cached: they make the zips, so they must really run
     outputs.upToDateWhen { false }
+    // Only some designs: ./gradlew testDebugUnitTest -Pdesigns=AuroraTown,D2 (part of the test class name)
+    providers.gradleProperty("designs").orNull?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.let { names ->
+        filter {
+            names.forEach { includeTestsMatching("*$it*") }
+            isFailOnNoMatchingTests = true
+        }
+    }
     testLogging {
         events = setOf(TestLogEvent.FAILED, TestLogEvent.SKIPPED)
         exceptionFormat = TestExceptionFormat.FULL

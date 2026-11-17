@@ -78,7 +78,7 @@ import kotlin.math.sqrt
  * - [CwfAuroraTownDesignTest] (`Aurora_Town.zip`) for this branch: the aurora waves, the lights blink
  *   and snow falls while the wake animation plays; the aurora and the lights stay on afterwards. The
  *   watch draws the moon in today's phase.
- * - [CwfAuroraTownStockDesignTest] (`Aurora_Town_Stock.zip`) for plain AAPS: the aurora, the moon and
+ * - [CwfAuroraTownStockDesignTest] (`Aurora_Town_mmol_AAPS4.zip`) and [CwfAuroraTownStockMgdlDesignTest] (`Aurora_Town_mgdl_AAPS4.zip`) for plain AAPS: the aurora, the moon and
  *   the lights are in the background picture, and the snow is the second hand, so it moves once a
  *   second. Only what plain AAPS knows is in the json.
  */
@@ -86,6 +86,15 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
 
     /** True for the animated design of this branch, false for the one of plain AAPS. */
     protected abstract val animated: Boolean
+
+    /**
+     * True for a design whose glucose is in mg/dL. The snow caps of the glucose are a second text the
+     * watch makes from the value in mg/dL, so a design shows one unit: mmol/L (false) or mg/dL (true).
+     */
+    protected open val mgdl: Boolean = false
+
+    /** The format of the glucose of the caps: one decimal in mmol/L, none in mg/dL. */
+    private val capFormat: String get() = if (mgdl) MGDL_FORMAT else MMOL_FORMAT
 
     /** The pictures, made once for all tests of a class: making them takes a few seconds. */
     private val pictures: AuroraTownImages get() = PICTURES
@@ -232,7 +241,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
 
         // The glucose value: the cap below (worked out from mg/dL on the watch), the cut digits above in the level colour
         val sgv = sgvBox()
-        text(CAP_VIEW, sgv, SGV_SIZE, "right", CAP_FONT, SNOW_COLOR).put("dynValue", true).put("textvalue", MMOL_FORMAT).put("dynData", MMOL_DYN)
+        text(CAP_VIEW, sgv, SGV_SIZE, "right", CAP_FONT, SNOW_COLOR).put("dynValue", true).put("textvalue", capFormat).put("dynData", MMOL_DYN)
         text("sgv", sgv, SGV_SIZE, "right", CUT_FONT, MID_COLOR)
         place("direction", arrowBox())
 
@@ -253,12 +262,13 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
     }
 
     /**
-     * The glucose value in mmol/L from the mg/dL the watch gets: 0 to 1800 mg/dL is 0 to 100 mmol/L, so
-     * the value is mg/dL / 18. Formatted by the watch, with its decimal sign. Empty without a value.
+     * The glucose value of the caps from the mg/dL the watch gets. In mmol/L 0 to 1800 mg/dL is 0 to 100
+     * mmol/L, so the value is mg/dL / 18; in mg/dL it stays as it is. Formatted by the watch, with its
+     * decimal sign. Empty without a value.
      */
     private fun mmolDynData(): JSONObject = JSONObject().put("valueKey", ViewKeys.SGV.key).put("minData", 0).put("maxData", 1800)
-        .put("dynValue", JSONObject().put("minValue", 0).put("maxValue", 100))
-        .put("textvalue1", MMOL_FORMAT).put("invalidTextvalue", "")
+        .put("dynValue", JSONObject().put("minValue", 0).put("maxValue", if (mgdl) 1800 else 100))
+        .put("textvalue1", capFormat).put("invalidTextvalue", "")
 
     /** The wake animation: the aurora waves, the lights twinkle and chase, snow blows from left to right. */
     private fun animationJson(): JSONObject {
@@ -432,7 +442,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
 
     /** A glucose sample of [mgdl], its text as the phone sends it, in the decimal sign of the test locale. */
     protected fun sample(mgdl: Double = 120.0, level: Long = 0, arrow: String = "→"): Sample =
-        Sample(text = String.format(locale, "%.1f", mgdl / MGDL_PER_MMOL), arrow = arrow, mgdl = mgdl, level = level)
+        Sample(text = if (this.mgdl) String.format(locale, MGDL_FORMAT, mgdl) else String.format(locale, MMOL_FORMAT, mgdl / MGDL_PER_MMOL), arrow = arrow, mgdl = mgdl, level = level)
 
     protected fun at(hour: Int, minute: Int, second: Int = 0): Long =
         LocalDateTime.of(2026, 12, 24, hour, minute, second).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
@@ -571,7 +581,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         val json = design.toString(4)
         val images = images()
         // A wake always starts with the frame at 0 ms
-        val previewImage = if (animated) wakeFrames(listOf(0L, PREVIEW_WAKE_MS)).getValue(PREVIEW_WAKE_MS)!! else preview(design, default, images, PREVIEW_MS)
+        val previewImage = if (animated) wakeFrames(listOf(0L, PREVIEW_WAKE_MS)).getValue(PREVIEW_WAKE_MS)!! else face(PREVIEW_MS).second // with a glucose in the unit of the design
         val jpg = ByteArrayOutputStream().also { previewImage.compress(Bitmap.CompressFormat.JPEG, PREVIEW_QUALITY, it) }.toByteArray()
         val zip = zip(json, jpg, images)
         File(out, "$fileName.zip").writeBytes(zip)
@@ -701,6 +711,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
     @Test
     @Config(qualifiers = "nl-rNL")
     fun theGlucoseCapHasTheDecimalCommaInDutch() {
+        assumeTrue(!mgdl) // only mmol/L has a decimal sign
         assertThat(locale.language).isEqualTo("nl")
         val sample = sample(120.0)
         assertThat(sample.text).isEqualTo("6,7")
@@ -825,6 +836,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         const val ARROW_GAP = 4
         const val MGDL_PER_MMOL = 18.0
         const val MMOL_FORMAT = "%.1f"
+        const val MGDL_FORMAT = "%.0f"
         const val MMOL_DYN = "sgvMmol"
 
         /** The square of a clock hand: 21, so its middle lies within 0.3 of the middle of the clock. */

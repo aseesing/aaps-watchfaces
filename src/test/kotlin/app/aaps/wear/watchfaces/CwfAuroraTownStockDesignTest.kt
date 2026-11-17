@@ -10,14 +10,14 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * The Christmas face "Aurora Town" for plain AAPS (`Aurora_Town_Stock.zip`): everything in the background picture, the snow as the second hand. See [AuroraTownDesignBase].
+ * The Christmas face "Aurora Town" for plain AAPS, glucose in mmol/L (`Aurora_Town_mmol_AAPS4.zip`): everything in the background picture, the snow as the second hand. See [AuroraTownDesignBase].
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35])
 class CwfAuroraTownStockDesignTest : AuroraTownDesignBase() {
 
-    override val displayName = "Aurora Town Stock"
-    override val fileName = "Aurora_Town_Stock"
+    override val displayName = "Aurora Town mmol"
+    override val fileName = "Aurora_Town_mmol_AAPS4"
     override val animated = false
 }

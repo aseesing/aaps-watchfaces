@@ -5,7 +5,7 @@ Custom watch face (CWF) designs for the AAPS watch app. Each design is a zip tha
 
 Most of them need the AAPS fork [aseesing/AndroidAPS](https://github.com/aseesing/AndroidAPS)
 (branch `local/personal`): its watch app plays the wake-up animations and knows the extra values.
-`Aurora_Town_Stock.zip` is made for plain AAPS 4.0.0.
+`Aurora_Town_mmol_AAPS4.zip` and `Aurora_Town_mgdl_AAPS4.zip` are made for plain AAPS 4.0.0 (glucose in mmol/L or mg/dL).
 
 | | | |
 |:-:|:-:|:-:|
@@ -41,11 +41,17 @@ Run all design tests (this checks every design and writes every zip):
 ./gradlew testDebugUnitTest
 ```
 
-Or one design:
+That takes about a quarter of an hour. When you change a design, build only that one (about a
+minute); the name is part of the test class name, more than one with commas:
 
 ```
-./gradlew testDebugUnitTest --tests "*CwfTechDesignTest*"
+./gradlew testDebugUnitTest -Pdesigns=AuroraTown
+./gradlew testDebugUnitTest -Pdesigns=AuroraTown,D2
 ```
+
+Keep the Gradle daemon on (do not add `--no-daemon`): it saves the start-up time of every build. When
+AAPS is included in this build, it only adds the 6 modules the designs need (see
+`watchfaces.settings.gradle` in AAPS).
 
 Each test writes its zip and preview pictures to `build/cwf-design/`. It also checks that the zip kept
 in `cwf-designs/` is the same design. To change a design: change its test, run it, and copy
