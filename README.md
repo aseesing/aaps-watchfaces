@@ -1,0 +1,69 @@
+# AAPS watch faces
+
+Custom watch face (CWF) designs for the AAPS watch app. Each design is a zip that you load in AAPS
+(Wear → watch face). The finished zips are in `cwf-designs/`.
+
+Most of them need the AAPS fork [aseesing/AndroidAPS](https://github.com/aseesing/AndroidAPS)
+(branch `local/personal`): its watch app plays the wake-up animations and knows the extra values.
+`Aurora_Town_Stock.zip` is made for plain AAPS 4.0.0.
+
+| | | |
+|:-:|:-:|:-:|
+| ![Cyberpunk Tech](images/cyberpunk_tech.gif) | ![Cyberpunk Weather](images/cyberpunk_weather.gif) | ![Cyberpunk Yellow](images/cyberpunk_yellow.gif) |
+| ![Wilds Weather](images/wilds_weather.gif) | ![Grand Complication Day](images/grand_complication_day.gif) | ![Grand Complication Night](images/grand_complication_night.gif) |
+| | ![D2](images/d2.gif) | |
+
+The designs are not drawn by hand. A test builds each one with the real watch face code of AAPS: it
+draws the face, checks it (no text cut off, everything on the round screen, ...) and writes the zip.
+
+## It needs AAPS
+
+This project builds against an AAPS checkout. It includes AAPS as a Gradle composite build and uses
+the module `:wear:cwfrender` (the watch face code, built for the phone).
+
+Where AAPS lies is `aapsDir`:
+
+- `gradle.properties` has the default: `../AndroidAPS` (a checkout beside this folder);
+- `local.properties` (not in git) can set your own path, and it wins: `aapsDir=/path/to/AndroidAPS`;
+- or on the command line: `./gradlew -PaapsDir=/path/to/AndroidAPS ...`.
+
+`local.properties` also needs `sdk.dir`, the Android SDK, as in AAPS.
+
+The AAPS checkout must have the watch face code these designs use (the `local/personal` branch, not
+plain upstream AAPS). When AAPS is included in this build, it leaves out its `:app` project: the app
+stops a build when its folder has uncommitted changes, and the app is not needed here.
+
+## Build a design
+
+Run all design tests (this checks every design and writes every zip):
+
+```
+./gradlew testDebugUnitTest
+```
+
+Or one design:
+
+```
+./gradlew testDebugUnitTest --tests "*CwfTechDesignTest*"
+```
+
+Each test writes its zip and preview pictures to `build/cwf-design/`. It also checks that the zip kept
+in `cwf-designs/` is the same design. To change a design: change its test, run it, and copy
+`build/cwf-design/<name>.zip` over the one in `cwf-designs/`.
+
+A zip must stay below about 320 KB, or the phone cannot send it to the watch.
+
+## Files
+
+- `src/test/kotlin/` - the design tests (`Cwf*DesignTest`) and their shared code (`*DesignBase`).
+- `cwf-designs/` - the finished zips, and `fonts/` with the fonts the designs bring (each with its
+  licence, SIL Open Font License).
+- `xmas-bg/` - the source photos of the Aurora Town design.
+- `docs/font-subset.md` - how to make a font file smaller before a design uses it.
+
+- `images/` - the animated pictures at the top, also shown by the README of the AAPS fork. They are made by
+  `ReadmeAnimationsTest`, which writes them here:
+
+```
+CWF_README_GIFS=1 ./gradlew testDebugUnitTest --tests "*ReadmeAnimationsTest*"
+```
