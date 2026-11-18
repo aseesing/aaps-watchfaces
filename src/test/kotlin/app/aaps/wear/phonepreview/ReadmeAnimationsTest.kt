@@ -66,7 +66,8 @@ class ReadmeAnimationsTest {
         Face("Wilds_Weather", "wilds_weather"),
         Face("Grand_Complication_Day", "grand_complication_day", animated = false),
         Face("Grand_Complication_Night", "grand_complication_night", weather = EventData.Weather.PARTLY, phoneBattery = 15),
-        Face("D2", "d2", weather = EventData.Weather.PARTLY)
+        Face("D2", "d2", weather = EventData.Weather.PARTLY),
+        Face("Aurora_Town", "aurora_town")
     )
 
     @Test

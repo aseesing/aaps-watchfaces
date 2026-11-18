@@ -522,7 +522,8 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
 
     /** A face that shows the design at [instant] with [sample], drawn once, so its views are laid out. */
     private fun face(
-        instant: Long, sample: Sample = sample(), place: GeoPoint? = null, extraImages: Map<String, ByteArray> = emptyMap(), change: (JSONObject) -> Unit = {}
+        instant: Long, sample: Sample = sample(), place: GeoPoint? = null, extraImages: Map<String, ByteArray> = emptyMap(), size: Int = 400,
+        change: (JSONObject) -> Unit = {}
     ): Pair<CustomWatchface, Bitmap> {
         val design = design(default).also(change)
         val face = storedFace(design, default, images() + extraImages, instant)
@@ -544,7 +545,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         storeSampleData(face, sample)
         Thread.sleep(600)   // past the render data share window
         face.refreshRenderData()
-        return face to face.renderToBitmap(400, 400)
+        return face to face.renderToBitmap(size, size)
     }
 
     /** The design without the snow of the second hand (stock), which would lie over the digits by chance. */
@@ -757,6 +758,28 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         // The time view is as wide as the time, and too narrow for one more character
         assertThat(TIME_SLACK).isLessThan(advance(':', TIME_SIZE))
         for (digit in "0123456789") assertThat(advance(digit, TIME_SIZE)).isEqualTo(advance('0', TIME_SIZE))
+    }
+
+    /**
+     * The watch rounds the width of a view down to whole pixels, but scales the text size without
+     * rounding. So at some screen sizes the text is a little wider than at 400 px, compared to its view.
+     * The time and the glucose value must still fit on their first line at every real screen size; with
+     * too little room the last digit breaks to the second line, which is cut off ("10:1" for "10:12").
+     */
+    @Test
+    fun theTextsFitAtEveryScreenSize() {
+        for (size in SCREEN_SIZES) for ((h, m, s) in listOf(Triple(10, 12, 37), Triple(18, 48, 8), Triple(0, 0, 0))) {
+            val (face, _) = face(at(h, m, s), size = size, change = ::withoutSnow)
+            val expected = String.format(Locale.ROOT, "%02d:%02d", h, m)
+            for (id in listOf(R.id.time, R.id.hour, R.id.minute, R.id.sgv, R.id.freetext1)) {
+                val view = face.textOf(id)
+                val text = view.text.toString()
+                if (text.isEmpty()) continue
+                val firstLine = text.substring(0, view.layout.getLineEnd(0))
+                val whole = if (id == R.id.time) expected else text
+                assertWithMessage("$size px: first line of ${view.resources.getResourceEntryName(id)} \"$text\"").that(firstLine).isEqualTo(whole)
+            }
+        }
     }
 
     @Test
@@ -1170,8 +1193,11 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
          */
         const val TIME_SIZE = 48
         const val TIME_MIDDLE = 58f
-        const val TIME_SLACK = 2
+        const val TIME_SLACK = 6
         const val CAP_ROOM = 12
+
+        /** Screen sizes of real watches (and of the README pictures, 300 and 320 px), in pixels. */
+        val SCREEN_SIZES = listOf(300, 320, 384, 390, 396, 400, 450, 454, 466, 480)
 
         /** The glucose value: its size, the middle of its digits, and where it may lie (it ends at [SGV_RIGHT]). */
         const val SGV_SIZE = 72
