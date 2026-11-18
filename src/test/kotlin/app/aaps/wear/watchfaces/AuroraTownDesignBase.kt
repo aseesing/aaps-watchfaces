@@ -15,6 +15,7 @@ import android.graphics.Typeface
 import android.text.Layout
 import android.util.TypedValue
 import android.view.View
+import android.view.ViewGroup
 import android.widget.TextView
 import androidx.core.graphics.createBitmap
 import app.aaps.core.interfaces.rx.weardata.CwfData
@@ -107,6 +108,17 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
     /** The format of the glucose of the caps: one decimal in mmol/L, none in mg/dL. */
     private val capFormat: String get() = if (mgdl) MGDL_FORMAT else MMOL_FORMAT
 
+    /**
+     * How much lower the snow on the time lies than the red digits in the json, in design pixels. Real
+     * watches draw the snow on a time with seconds (two lines, the second one cut off) about 7 px higher
+     * on its digits than the phone preview and these tests do; the glucose (one line) is the same
+     * everywhere. Why is not known. So in the stock designs, which show seconds, the caps lie
+     * [STOCK_CAP_SHIFT] lower: the value a user found on a Galaxy Watch 4 (450 px), also right on a
+     * OnePlus watch. The preview and these pictures show the snow a little low. The animated design
+     * shows no seconds, so its time is one line, like its caps.
+     */
+    private val timeCapShift: Int get() = if (animated) 0 else STOCK_CAP_SHIFT
+
     /** The pictures, made once for all tests of a class: making them takes a few seconds. */
     private val pictures: AuroraTownImages get() = PICTURES
 
@@ -170,9 +182,38 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
     /** The box of the time digits "88:88" (left, top, width, height): exactly as wide as the text, one line high. */
     protected fun timeBox(): Rect {
         val width = 4 * advance('0', TIME_SIZE) + advance(':', TIME_SIZE)
-        val left = 200 - width / 2
+        val left = timeLefts.first
         val top = topFor(TIME_MIDDLE, TIME_SIZE)
         return Rect(left, top, left + width, top + firstOfTwoLines(TIME_SIZE))
+    }
+
+    /**
+     * The left of the time and the left of the view with the snow on the minutes, in design pixels.
+     * The watch cuts the left of each view to whole pixels at its screen size, and each character
+     * advances by its width rounded to whole pixels. The minutes inside the time start at the left of
+     * the time plus those widths of "00:"; the snow on them at the left of its own view. So at some screen sizes the snow on the
+     * minutes lies a pixel beside its digits. Of the lefts near the middle, these are the ones with the
+     * same such error at all [SCREEN_SIZES] (it cannot be 0 at all of them), then the smallest, then the
+     * nearest to the middle and to the width of "00:".
+     */
+    private val timeLefts: Pair<Int, Int> by lazy {
+        val width = 4 * advance('0', TIME_SIZE) + advance(':', TIME_SIZE)
+        // Per screen size, how many pixels the snow on the minutes lies right of its digits
+        fun errors(time: Int, minutes: Int): List<Int> = SCREEN_SIZES.map { size ->
+            val zoom = size / 400.0
+            // Each character advances by its own width, rounded to whole pixels
+            val hours = "00:".sumOf { (SnowCapFont.advance(it) * TIME_SIZE * zoom / SnowCapFont.unitsPerEm).roundToInt() }
+            (minutes * zoom).toInt() - ((time * zoom).toInt() + hours)
+        }
+        val middle = 200 - width / 2
+        val design = 2 * advance('0', TIME_SIZE) + advance(':', TIME_SIZE)
+        (middle - 2..middle + 2).flatMap { time -> (time + design - 2..time + design + 2).map { time to it } }.minWith(
+            compareBy(
+                { (time, minutes) -> errors(time, minutes).let { it.max() - it.min() } }, // the same at every size
+                { (time, minutes) -> errors(time, minutes).sumOf { abs(it) } },            // and as small as can be
+                { abs(it.first - middle) }, { abs(it.second - it.first - design) }
+            )
+        )
     }
 
     /** The box of the glucose value and its cap: the value ends at [SGV_RIGHT], one line high. */
@@ -243,12 +284,14 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         // The time: the red digits, then the snow on the hours and on the minutes
         val time = timeBox()
         val digit = advance('0', TIME_SIZE)
-        val colon = advance(':', TIME_SIZE)
         text("time", Rect(time.left, time.top, time.right + TIME_SLACK, time.bottom), TIME_SIZE, "left", BASE_FONT, TIME_COLOR)
-        val hoursRight = time.left + 2 * digit
-        text("hour", Rect(hoursRight - 2 * digit - CAP_ROOM, time.top, hoursRight, time.bottom), TIME_SIZE, "right", CAP_FONT, SNOW_COLOR)
-        val minutesLeft = hoursRight + colon
-        text("minute", Rect(minutesLeft, time.top, minutesLeft + 2 * digit + CAP_ROOM, time.bottom), TIME_SIZE, "left", CAP_FONT, SNOW_COLOR)
+        // Both caps start where their digits start (gravity left): the watch rounds only the left edge
+        // of a view to whole pixels then, the same way as the one of the time. A view that ends at the
+        // digits (gravity right) also rounds its width, and lies up to 2 px off at some screen sizes.
+        val capsTop = time.top + timeCapShift
+        val minutesLeft = timeLefts.second
+        text("hour", Rect(time.left, capsTop, time.left + 2 * digit + CAP_ROOM, capsTop + time.height()), TIME_SIZE, "left", CAP_FONT, SNOW_COLOR)
+        text("minute", Rect(minutesLeft, capsTop, minutesLeft + 2 * digit + CAP_ROOM, capsTop + time.height()), TIME_SIZE, "left", CAP_FONT, SNOW_COLOR)
 
         // The glucose value: the cap below (worked out from mg/dL on the watch), the cut digits above in the level colour
         val sgv = sgvBox()
@@ -636,7 +679,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
      * when the cut digit and the cap are drawn on their own. So both views draw the same text at the
      * same place, and the snow sits on its digit.
      */
-    private fun assertCapsOnDigits(name: String, picture: Bitmap, text: String, left: Int, top: Int, bottom: Int, size: Int, color: String) {
+    private fun assertCapsOnDigits(name: String, picture: Bitmap, text: String, left: Int, top: Int, bottom: Int, size: Int, color: String, tolerance: Float = CAP_TOLERANCE) {
         val digits = inkMiddles(text, size, cutFace)
         val caps = inkMiddles(text, size, capFace)
         var x = left
@@ -649,9 +692,46 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
                 assertWithMessage("$name: digit $char").that(digit).isNotNull()
                 assertWithMessage("$name: snow on $char").that(snow).isNotNull()
                 assertWithMessage("$name: digit $char at ${digit!! - left}, font ${digits[index]}").that(digit - left).isWithin(CAP_TOLERANCE).of(digits[index]!!)
-                assertWithMessage("$name: snow on $char at ${snow!! - left}, font ${caps[index]}").that(snow - left).isWithin(CAP_TOLERANCE).of(caps[index]!!)
+                assertWithMessage("$name: snow on $char at ${snow!! - left}, font ${caps[index]}").that(snow - left).isWithin(tolerance).of(caps[index]!!)
             }
             x += width
+        }
+    }
+
+    /** The first and the last row of [r] in [bitmap] with at least [MIN_ROW_INK] pixels that [match]; null when there are none. */
+    private fun inkRows(bitmap: Bitmap, r: Rect, match: (Int) -> Boolean): IntRange? {
+        val rows = (r.top until r.bottom).filter { y -> count(bitmap, Rect(r.left, y, r.right, y + 1), match) >= MIN_ROW_INK }
+        return if (rows.isEmpty()) null else rows.first()..rows.last()
+    }
+
+    /**
+     * How the snow lies on a digit: [dx] is the middle of the white ink less the middle of the coloured
+     * ink, [dy] the top row of the snow less the bottom row of the digit, both in screen pixels.
+     */
+    private data class SnowOnDigit(val char: Char, val dx: Float, val dy: Int)
+
+    /**
+     * Per digit of the first line of [view] (the coloured digits) in [picture], how the snow lies on it.
+     * Read from the views as the face laid them out at its screen size, so it works at every size.
+     */
+    private fun snowOnDigits(face: CustomWatchface, picture: Bitmap, view: TextView, color: String): List<SnowOnDigit> {
+        val box = Rect(0, 0, view.width, view.height)
+        (face.layoutView as ViewGroup).offsetDescendantRectToMyCoords(view, box)
+        val layout = view.layout
+        val baseline = box.top + view.baseline
+        // From above the snow (about 0.8 of the size above the baseline) to just below the digits
+        val top = baseline - (CELL_ABOVE * view.textSize).roundToInt()
+        return (0 until layout.getLineEnd(0)).filter { view.text[it].isDigit() }.map { i ->
+            val left = box.left + layout.getPrimaryHorizontal(i)
+            val right = left + view.paint.measureText(view.text, i, i + 1)
+            val cell = Rect(left.roundToInt(), top, right.roundToInt(), baseline + 3)
+            val digit = middleX(picture, cell) { near(it, color) }
+            val snow = middleX(picture, cell) { isSnow(it) }
+            val digitRows = inkRows(picture, cell) { near(it, color) }
+            val snowRows = inkRows(picture, cell) { isSnow(it) }
+            assertWithMessage("digit ${view.text[i]} of ${view.text}").that(digit != null && digitRows != null).isTrue()
+            assertWithMessage("snow on ${view.text[i]} of ${view.text}").that(snow != null && snowRows != null).isTrue()
+            SnowOnDigit(view.text[i], snow!! - digit!!, snowRows!!.first - digitRows!!.last)
         }
     }
 
@@ -743,7 +823,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
             assertWithMessage("first line bottom").that(layout.getLineBottom(0)).isIn(timeView.height..timeView.height + 1)
             assertWithMessage("first line ink").that(timeView.baseline + layout.paint.fontMetricsInt.bottom).isAtMost(timeView.height)
             assertWithMessage("baseline").that(timeView.baseline).isEqualTo(lineAbove(TIME_SIZE))
-            assertCapsOnDigits(expected, picture, expected, time.left, time.top, time.bottom, TIME_SIZE, TIME_COLOR)
+            assertCapsOnDigits(expected, picture, expected, time.left, time.top, time.bottom, TIME_SIZE, TIME_COLOR, SIDEWAYS_TOLERANCE)
             // Nothing of the seconds shows below the time
             val below = Rect(time.left - 10, time.bottom, time.right + 40, time.bottom + time.height())
             assertWithMessage("$expected: red below the time").that(count(picture, below) { near(it, TIME_COLOR, 50) }).isEqualTo(0)
@@ -780,6 +860,50 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
                 assertWithMessage("$size px: first line of ${view.resources.getResourceEntryName(id)} \"$text\"").that(firstLine).isEqualTo(whole)
             }
         }
+    }
+
+    /**
+     * The snow lies on its digits at every real screen size, for the time and for the glucose: per
+     * digit, sideways and in height, as when the digit and its cap are drawn alone at that size (the
+     * snow of the time [STOCK_CAP_SHIFT] lower, see `timeCapShift`). The watch places each view and each
+     * character on whole pixels, so two views that share a place in the design can come apart at some
+     * sizes; a view that ends at its digits (gravity right) was 2.7 px off at 450 px.
+     */
+    @Test
+    fun theSnowLiesOnTheDigitsAtEveryScreenSize() {
+        val sample = sample(199.0, 1) // high: 199 or 11.1
+        for (size in SCREEN_SIZES) {
+            val scale = size / 400f
+            val (face, picture) = face(at(20, 39, 25), sample, size = size, change = ::withoutSnow)
+            val time = snowOnDigits(face, picture, face.textOf(R.id.time), TIME_COLOR)
+            val glucose = snowOnDigits(face, picture, face.textOf(R.id.sgv), HIGH_COLOR)
+            assertWithMessage("$size px: time").that(time.map { it.char }.joinToString("")).isEqualTo("2039")
+            assertWithMessage("$size px: glucose").that(glucose.map { it.char }.joinToString("")).isEqualTo(sample.text.filter { it.isDigit() })
+            for ((name, digits, textSize, color, shift) in listOf(
+                SnowCheck("time", time, TIME_SIZE * scale, TIME_COLOR, timeCapShift * scale),
+                SnowCheck("glucose", glucose, SGV_SIZE * scale, HIGH_COLOR, 0f)
+            )) for (d in digits) {
+                val alone = snowOnDigitAlone(d.char, textSize, color)
+                assertWithMessage("$size px: $name, snow on ${d.char} sideways").that(d.dx).isWithin(SIDEWAYS_TOLERANCE).of(alone.dx)
+                assertWithMessage("$size px: $name, height of the snow on ${d.char}").that(d.dy.toFloat()).isWithin(SNOW_HEIGHT_TOLERANCE).of(alone.dy + shift)
+            }
+        }
+    }
+
+    private data class SnowCheck(val name: String, val digits: List<SnowOnDigit>, val textSize: Float, val color: String, val shift: Float)
+
+    /** How the snow lies on [char] when the cut digit (in [color]) and its cap are drawn alone at [textSize] on dark, measured as in a face. */
+    private fun snowOnDigitAlone(char: Char, textSize: Float, color: String): SnowOnDigit {
+        val size = textSize.roundToInt()
+        val bitmap = createBitmap(3 * size, 3 * size).apply { eraseColor(Color.BLACK) }
+        val canvas = Canvas(bitmap)
+        for ((typeface, ink) in listOf(cutFace to color, capFace to SNOW_COLOR)) {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.textSize = textSize; this.typeface = typeface; this.color = Color.parseColor(ink) }
+            canvas.drawText(char.toString(), size.toFloat(), 2f * size, paint)
+        }
+        val all = Rect(0, 0, bitmap.width, bitmap.height)
+        val dx = middleX(bitmap, all) { isSnow(it) }!! - middleX(bitmap, all) { near(it, color) }!!
+        return SnowOnDigit(char, dx, inkRows(bitmap, all) { isSnow(it) }!!.first - inkRows(bitmap, all) { near(it, color) }!!.last)
     }
 
     @Test
@@ -1196,6 +1320,9 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         const val TIME_SLACK = 6
         const val CAP_ROOM = 12
 
+        /** See `timeCapShift`: how much lower the snow on the time lies in the stock designs. */
+        const val STOCK_CAP_SHIFT = 7
+
         /** Screen sizes of real watches (and of the README pictures, 300 and 320 px), in pixels. */
         val SCREEN_SIZES = listOf(300, 320, 384, 390, 396, 400, 450, 454, 466, 480)
 
@@ -1289,6 +1416,27 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
 
         /** How far the middle of a cap may be from the middle of its digit, in pixels. */
         const val CAP_TOLERANCE = 1.5f
+
+        /**
+         * How far the middle of the snow on a digit may be from the expected one in a face of any size,
+         * in pixels: [CAP_TOLERANCE] for the anti-aliased edges, and 1 px more because each character
+         * advances by whole pixels. At some size the snow on the minutes is always a pixel off (see
+         * `timeLefts`).
+         */
+        const val SIDEWAYS_TOLERANCE = CAP_TOLERANCE + 1f
+
+        /**
+         * How far the height of the snow on a digit may be from the expected one, in pixels: both edges
+         * are anti-aliased, and the watch puts each view and each baseline on a whole pixel. The error
+         * this test is for was 7 px.
+         */
+        const val SNOW_HEIGHT_TOLERANCE = 2.5f
+
+        /** How far above the baseline a cell of a digit starts, as a part of the text size: above the snow, below the text over it. */
+        const val CELL_ABOVE = 0.95f
+
+        /** The fewest ink pixels in a row that count as a row of a digit or a cap. */
+        const val MIN_ROW_INK = 2
 
         /** The fewest pixels that count as a digit or a cap in a cell. */
         const val MIN_INK = 8
