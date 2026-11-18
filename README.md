@@ -6,6 +6,12 @@ Custom watch face (CWF) designs for the AAPS watch app. Each design is a zip tha
 Most of them need the AAPS fork [aseesing/AndroidAPS](https://github.com/aseesing/AndroidAPS)
 (branch `local/personal`): its watch app plays the wake-up animations and knows the extra values.
 `Aurora_Town_mmol_AAPS4.zip` and `Aurora_Town_mgdl_AAPS4.zip` are made for plain AAPS 4.0.0 (glucose in mmol/L or mg/dL).
+`Grand_Complication_Day_AAPS4.zip` and `Grand_Complication_Night_AAPS4.zip` are made for plain AAPS 4.0.0 too.
+
+Grand Complication (all four zips) has two settings, both normal AAPS settings: "Show IOB" and
+"Show COB" (watch: AAPS, Settings, Display) put IOB and COB in the disc on the left, and the glucose
+scale follows the units of the phone (mmol/L or mg/dL). With IOB and COB both off, the animated
+zips show the sky with the sun and the moon in the disc; the `_AAPS4` zips show no disc at all.
 
 | | | |
 |:-:|:-:|:-:|

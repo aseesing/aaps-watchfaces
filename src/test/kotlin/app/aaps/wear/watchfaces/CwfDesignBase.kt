@@ -84,6 +84,9 @@ abstract class CwfDesignBase {
     /** The fonts the zip brings, by name. None: the design uses the fonts of the watch. */
     protected open fun fonts(): Map<String, ByteArray> = emptyMap()
 
+    /** Other files the zip brings, by their full name (a font licence, for example). The watch does not read them. */
+    protected open fun otherFiles(): Map<String, ByteArray> = emptyMap()
+
     /** The font of the values in the complication slots, as the watch draws them for this design. */
     protected open fun valueTypeface(): Typeface = Typeface.DEFAULT
 
@@ -193,10 +196,12 @@ abstract class CwfDesignBase {
 
     /**
      * A render-only face that shows [design], with 24 hour time as on the watch, as it looks at
-     * [instant] in [weather], with the watch battery at [watchBattery] %.
+     * [instant] in [weather], with the watch battery at [watchBattery] %. [prefs] can set the watch
+     * settings a design reads (show IOB, the units, ...) before the face loads the design.
      */
     protected fun storedFace(
-        design: JSONObject, default: CwfData, images: Map<String, ByteArray>, instant: Long, weather: String? = null, watchBattery: Int? = WATCH_SAMPLE
+        design: JSONObject, default: CwfData, images: Map<String, ByteArray>, instant: Long, weather: String? = null, watchBattery: Int? = WATCH_SAMPLE,
+        prefs: (CustomWatchface) -> Unit = {}
     ): CustomWatchface {
         setWatchBattery(watchBattery)
         val face = newFace()
@@ -207,6 +212,7 @@ abstract class CwfDesignBase {
             face.sp.putBoolean(key, true)
         face.sp.putString(R.string.key_weather_kind, weather ?: "")
         face.sp.putLong(R.string.key_weather_time, instant)
+        prefs(face)
         val resData = resources(default, images)
         runBlocking { face.complicationDataRepository.storeCustomWatchface(CwfData(design.toString(4), ZipWatchfaceFormat.loadMetadata(design), resData)) }
         Thread.sleep(600)   // past the render data share window
@@ -216,8 +222,10 @@ abstract class CwfDesignBase {
     }
 
     /** Renders [design] on black, with the boxes drawn as an example, as the zip's preview image. */
-    protected fun preview(design: JSONObject, default: CwfData, images: Map<String, ByteArray>, instant: Long, weather: String? = null): Bitmap {
-        val face = storedFace(design, default, images, instant, weather)
+    protected fun preview(
+        design: JSONObject, default: CwfData, images: Map<String, ByteArray>, instant: Long, weather: String? = null, prefs: (CustomWatchface) -> Unit = {}
+    ): Bitmap {
+        val face = storedFace(design, default, images, instant, weather, prefs = prefs)
         val image = createBitmap(400, 400).apply { eraseColor(Color.BLACK) }
         val canvas = Canvas(image)
         canvas.drawBitmap(face.renderToBitmap(400, 400), 0f, 0f, null)
@@ -317,6 +325,11 @@ abstract class CwfDesignBase {
             fonts().forEach { (name, font) ->
                 zip.putNextEntry(ZipEntry("$name.ttf"))
                 zip.write(font)
+                zip.closeEntry()
+            }
+            otherFiles().forEach { (name, bytes) ->
+                zip.putNextEntry(ZipEntry(name))
+                zip.write(bytes)
                 zip.closeEntry()
             }
         }
