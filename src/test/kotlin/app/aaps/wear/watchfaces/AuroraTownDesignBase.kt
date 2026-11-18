@@ -108,17 +108,6 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
     /** The format of the glucose of the caps: one decimal in mmol/L, none in mg/dL. */
     private val capFormat: String get() = if (mgdl) MGDL_FORMAT else MMOL_FORMAT
 
-    /**
-     * How much lower the snow on the time lies than the red digits in the json, in design pixels. Real
-     * watches draw the snow on a time with seconds (two lines, the second one cut off) about 7 px higher
-     * on its digits than the phone preview and these tests do; the glucose (one line) is the same
-     * everywhere. Why is not known. So in the stock designs, which show seconds, the caps lie
-     * [STOCK_CAP_SHIFT] lower: the value a user found on a Galaxy Watch 4 (450 px), also right on a
-     * OnePlus watch. The preview and these pictures show the snow a little low. The animated design
-     * shows no seconds, so its time is one line, like its caps.
-     */
-    private val timeCapShift: Int get() = if (animated) 0 else STOCK_CAP_SHIFT
-
     /** The pictures, made once for all tests of a class: making them takes a few seconds. */
     private val pictures: AuroraTownImages get() = PICTURES
 
@@ -288,10 +277,9 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         // Both caps start where their digits start (gravity left): the watch rounds only the left edge
         // of a view to whole pixels then, the same way as the one of the time. A view that ends at the
         // digits (gravity right) also rounds its width, and lies up to 2 px off at some screen sizes.
-        val capsTop = time.top + timeCapShift
         val minutesLeft = timeLefts.second
-        text("hour", Rect(time.left, capsTop, time.left + 2 * digit + CAP_ROOM, capsTop + time.height()), TIME_SIZE, "left", CAP_FONT, SNOW_COLOR)
-        text("minute", Rect(minutesLeft, capsTop, minutesLeft + 2 * digit + CAP_ROOM, capsTop + time.height()), TIME_SIZE, "left", CAP_FONT, SNOW_COLOR)
+        text("hour", Rect(time.left, time.top, time.left + 2 * digit + CAP_ROOM, time.bottom), TIME_SIZE, "left", CAP_FONT, SNOW_COLOR)
+        text("minute", Rect(minutesLeft, time.top, minutesLeft + 2 * digit + CAP_ROOM, time.bottom), TIME_SIZE, "left", CAP_FONT, SNOW_COLOR)
 
         // The glucose value: the cap below (worked out from mg/dL on the watch), the cut digits above in the level colour
         val sgv = sgvBox()
@@ -588,7 +576,32 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         storeSampleData(face, sample)
         Thread.sleep(600)   // past the render data share window
         face.refreshRenderData()
+        face.renderToBitmap(size, size) // makes the views
+        likeOnTheWatch(face.layoutView!!)
         return face to face.renderToBitmap(size, size)
+    }
+
+    /**
+     * Makes the text views under [root] lay out their lines as on a watch. The watch app targets
+     * Android 11 (`wearTargetSdk` 30 in AAPS), and Android keeps old behaviour for such apps: there a
+     * one-line text (`BoringLayout`) gets no fallback line spacing, so it starts at the top of the font
+     * box, while a longer text (`StaticLayout`) starts at the ascent when that is higher. Apps for
+     * Android 13 and newer (compat change 210923482, `TextView.BORINGLAYOUT_FALLBACK_LINESPACING`) use
+     * the ascent for both, and so do these tests (Robolectric turns every compat change on) and the
+     * phone preview. A text view keeps this in `mUseFallbackLineSpacing`: 1 for `StaticLayout` only,
+     * 2 for both; set to 1 here, and its layouts made again.
+     */
+    private fun likeOnTheWatch(root: View) {
+        val mode = TextView::class.java.getDeclaredField("mUseFallbackLineSpacing").apply { isAccessible = true }
+        val nullLayouts = TextView::class.java.getDeclaredMethod("nullLayouts").apply { isAccessible = true }
+        fun visit(view: View) {
+            if (view is TextView) {
+                mode.setInt(view, STATIC_LAYOUT_ONLY)
+                nullLayouts.invoke(view)
+            }
+            if (view is ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
+        }
+        visit(root)
     }
 
     /** The design without the snow of the second hand (stock), which would lie over the digits by chance. */
@@ -821,7 +834,9 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
             // The view is one line high: the first line shows whole (only its empty padding below may be
             // cut), the second not at all
             assertWithMessage("first line bottom").that(layout.getLineBottom(0)).isIn(timeView.height..timeView.height + 1)
-            assertWithMessage("first line ink").that(timeView.baseline + layout.paint.fontMetricsInt.bottom).isAtMost(timeView.height)
+            // The ink of the digits, not the bottom of the font box: that reaches down to the descent (see SnowCapFont)
+            val ink = Rect().also { layout.paint.getTextBounds(expected, 0, expected.length, it) }
+            assertWithMessage("first line ink").that(timeView.baseline + ink.bottom).isAtMost(timeView.height)
             assertWithMessage("baseline").that(timeView.baseline).isEqualTo(lineAbove(TIME_SIZE))
             assertCapsOnDigits(expected, picture, expected, time.left, time.top, time.bottom, TIME_SIZE, TIME_COLOR, SIDEWAYS_TOLERANCE)
             // Nothing of the seconds shows below the time
@@ -864,10 +879,11 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
 
     /**
      * The snow lies on its digits at every real screen size, for the time and for the glucose: per
-     * digit, sideways and in height, as when the digit and its cap are drawn alone at that size (the
-     * snow of the time [STOCK_CAP_SHIFT] lower, see `timeCapShift`). The watch places each view and each
-     * character on whole pixels, so two views that share a place in the design can come apart at some
-     * sizes; a view that ends at its digits (gravity right) was 2.7 px off at 450 px.
+     * digit, sideways and in height, as when the digit and its cap are drawn alone at that size. The
+     * faces lay their text out as the watch does ([likeOnTheWatch]): there the snow on the time once lay
+     * 7 px too high, since a one-line text started at the top of the font box. The watch places each
+     * view and each character on whole pixels, so two views that share a place in the design can come
+     * apart at some sizes; a view that ends at its digits (gravity right) was 2.7 px off at 450 px.
      */
     @Test
     fun theSnowLiesOnTheDigitsAtEveryScreenSize() {
@@ -879,18 +895,18 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
             val glucose = snowOnDigits(face, picture, face.textOf(R.id.sgv), HIGH_COLOR)
             assertWithMessage("$size px: time").that(time.map { it.char }.joinToString("")).isEqualTo("2039")
             assertWithMessage("$size px: glucose").that(glucose.map { it.char }.joinToString("")).isEqualTo(sample.text.filter { it.isDigit() })
-            for ((name, digits, textSize, color, shift) in listOf(
-                SnowCheck("time", time, TIME_SIZE * scale, TIME_COLOR, timeCapShift * scale),
-                SnowCheck("glucose", glucose, SGV_SIZE * scale, HIGH_COLOR, 0f)
+            for ((name, digits, textSize, color) in listOf(
+                SnowCheck("time", time, TIME_SIZE * scale, TIME_COLOR),
+                SnowCheck("glucose", glucose, SGV_SIZE * scale, HIGH_COLOR)
             )) for (d in digits) {
                 val alone = snowOnDigitAlone(d.char, textSize, color)
                 assertWithMessage("$size px: $name, snow on ${d.char} sideways").that(d.dx).isWithin(SIDEWAYS_TOLERANCE).of(alone.dx)
-                assertWithMessage("$size px: $name, height of the snow on ${d.char}").that(d.dy.toFloat()).isWithin(SNOW_HEIGHT_TOLERANCE).of(alone.dy + shift)
+                assertWithMessage("$size px: $name, height of the snow on ${d.char}").that(d.dy.toFloat()).isWithin(SNOW_HEIGHT_TOLERANCE).of(alone.dy.toFloat())
             }
         }
     }
 
-    private data class SnowCheck(val name: String, val digits: List<SnowOnDigit>, val textSize: Float, val color: String, val shift: Float)
+    private data class SnowCheck(val name: String, val digits: List<SnowOnDigit>, val textSize: Float, val color: String)
 
     /** How the snow lies on [char] when the cut digit (in [color]) and its cap are drawn alone at [textSize] on dark, measured as in a face. */
     private fun snowOnDigitAlone(char: Char, textSize: Float, color: String): SnowOnDigit {
@@ -1320,9 +1336,6 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         const val TIME_SLACK = 6
         const val CAP_ROOM = 12
 
-        /** See `timeCapShift`: how much lower the snow on the time lies in the stock designs. */
-        const val STOCK_CAP_SHIFT = 7
-
         /** Screen sizes of real watches (and of the README pictures, 300 and 320 px), in pixels. */
         val SCREEN_SIZES = listOf(300, 320, 384, 390, 396, 400, 450, 454, 466, 480)
 
@@ -1424,6 +1437,9 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
          * `timeLefts`).
          */
         const val SIDEWAYS_TOLERANCE = CAP_TOLERANCE + 1f
+
+        /** `TextView.mUseFallbackLineSpacing` of an app that targets Android 9 to 12: fallback line spacing for `StaticLayout` only. */
+        const val STATIC_LAYOUT_ONLY = 1
 
         /**
          * How far the height of the snow on a digit may be from the expected one, in pixels: both edges

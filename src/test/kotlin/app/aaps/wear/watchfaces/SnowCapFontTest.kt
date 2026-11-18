@@ -142,6 +142,22 @@ class SnowCapFontTest {
         assertThat(capMetrics.bottom).isEqualTo(baseMetrics.bottom)
     }
 
+    /**
+     * The top and the bottom of the font metrics (the box of the font) reach at least to the ascent and
+     * the descent, in all three fonts. Then a text view places a line in the same way whatever Android version the
+     * app targets: the watch app targets Android 11, where a one-line text starts at the top and a
+     * longer one at the ascent, so with a top below the ascent the snow on the time lay 8 px too high
+     * on the watch (at size 48), but not in the phone preview or in these tests.
+     */
+    @Test
+    fun theFontBoxReachesTheAscentAndTheDescent() {
+        for ((name, typeface) in listOf("base" to base, "cap" to cap, "cut" to cut)) {
+            val metrics = paint(typeface, 100f).fontMetricsInt
+            assertWithMessage("$name top").that(metrics.top).isAtMost(metrics.ascent)
+            assertWithMessage("$name bottom").that(metrics.bottom).isAtLeast(metrics.descent)
+        }
+    }
+
     @Test
     fun capOfEightLiesOnTopAndSticksOut() {
         val baseInk = Ink(mask(base, "8", 300f))
