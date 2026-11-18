@@ -75,6 +75,9 @@ import kotlin.math.sqrt
  *
  * Two things the wearer chooses with the normal AAPS settings, no other zip needed:
  *
+ * - **Any complication in the sky disc**: with "Complication 1" on in the settings of the watch face,
+ *   the disc shows the complication the wearer picks there (its slot, [DISC_SLOT], has the disc as a
+ *   round window behind it). It wins over IOB and COB.
  * - **IOB and COB in the sky disc**: with "Show IOB" or "Show COB" on (watch: AAPS, Settings,
  *   Display) the disc becomes a small window with the IOB and the COB, one or both. The sun, the moon
  *   and the land go away then (a dynPref on each). With both off, the disc shows the sky; in the
@@ -140,7 +143,9 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
     protected open val animated: Boolean = true
 
     /** The watch settings a render uses: IOB and COB in the disc, detailed IOB, and the units of the phone. */
-    data class Options(val iob: Boolean = false, val cob: Boolean = false, val detailedIob: Boolean = false, val mgdl: Boolean = false)
+    data class Options(
+        val iob: Boolean = false, val cob: Boolean = false, val detailedIob: Boolean = false, val mgdl: Boolean = false, val complication: Boolean = false
+    )
 
     /** The settings of the preview in the zip: the animated design shows its sky, the plain one the IOB and the COB. */
     protected open val previewOptions: Options get() = if (animated) Options() else Options(iob = true, cob = true)
@@ -160,6 +165,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         face.sp.putBoolean(R.string.key_show_cob, options.cob)
         face.sp.putBoolean(R.string.key_show_detailed_iob, options.detailedIob)
         face.sp.putBoolean(R.string.key_units_mgdl, options.mgdl)
+        face.sp.putBoolean(R.string.key_show_complication_1, options.complication)
     }
 
     override fun valueTypeface(): Typeface = serif()
@@ -198,19 +204,15 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
             .put(CwfMetadataKey.CWF_AUTHOR.key, "AAPS (local)")
             .put(CwfMetadataKey.CWF_CREATED_AT.key, if (animated) "13/11/26" else "18/11/26")
             .put(CwfMetadataKey.CWF_COMMENT.key, if (animated) COMMENT else STOCK_COMMENT)
-            .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION1.key, "false")
+            // Only settings that change something on this face. The steps slot and the date are on.
             .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION2.key, "true")
-            .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION3.key, "false")
-            .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION4.key, "false")
-            .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION5.key, "false")
             .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_DATE.key, "true")
             // The two battery hands are the delta views: they only show when these are on
             .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_DELTA.key, "true")
             .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_AVG_DELTA.key, "true")
-            .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_UPLOADER_BATTERY.key, "false")
-            .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_RIG_BATTERY.key, "false")
-        // Show IOB and Show COB are left out on purpose: the wearer chooses them, and with
-        // "authorization" on, the watch would set them back to what the zip says each time
+        // Complication 1 (the disc), Show IOB and Show COB are left out on purpose: the wearer chooses
+        // them, and with "authorization" on, the watch would set them back to what the zip says each time.
+        // The other slots and the batteries of the uploader and the rig are not on this face at all.
 
         // No seconds: the watch draws once a minute
         put("enableSecond", false)
@@ -219,7 +221,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         // Every view this design does not use is off
         val used = setOf(
             "background", "cover_chart", "cover_plate", "hour_hand", "minute_hand", "sgv", "direction", "timestamp", "loop",
-            "day_name", "day", STEPS_VIEW, BG_HAND_VIEW, PHONE_HAND_VIEW, IOB_VIEW, COB_VIEW, SCALE_VIEW
+            "day_name", "day", STEPS_VIEW, DISC_SLOT, BG_HAND_VIEW, PHONE_HAND_VIEW, IOB_VIEW, COB_VIEW, SCALE_VIEW
         ) + if (animated) setOf(SUN_VIEW, MOON_VIEW, SUN_CLOUD_VIEW, MOON_CLOUD_VIEW, WATCH_HAND_VIEW) else emptySet()
         keys().asSequence().toList().forEach { key ->
             val view = optJSONObject(key) ?: return@forEach
@@ -254,11 +256,17 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
 
         // The sky disc: the sky behind, or a window while it shows IOB or COB
         place("cover_chart", (SKY_X - SKY_R).toInt(), (SKY_Y - SKY_R).toInt(), (2 * SKY_R).toInt()).put("visibility", "visible").put("dynPref", DISC_CHART)
-        // IOB above COB; when one of them is off, the other moves to the middle of the disc
+        // Complication 1 fills the disc: a round window behind it, a ring along the disc for a value with a range.
+        // The watch draws it under all views, so while it shows, the disc views above it are see-through.
+        place(DISC_SLOT, (SKY_X - SKY_R).toInt(), (SKY_Y - SKY_R).toInt(), (2 * SKY_R).toInt())
+            .put("color", p.window).put("borderRadius", SKY_R.toInt()).put("ringWidth", DISC_RING)
+            .put("ringPrimaryColor", p.hand).put("ringSecondaryColor", p.dialRing)
+            .put("fontColor", p.ink).put("iconColor", p.ink).put("textsize", DISC_SIZE).put("font", FONT).put("fontStyle", "normal").put("gravity", "center")
+        // IOB above COB; when one of them is off, the other moves to the middle of the disc. Gone under a complication.
         text(IOB_VIEW, discLine(-DISC_LINE_GAP / 2f), DISC_SIZE, "center", p.ink)
-            .put("twinView", COB_VIEW).put("topOffsetTwinHidden", (DISC_LINE_GAP / 2f).toInt()).put("dynPref", IOB_DETAIL)
+            .put("twinView", COB_VIEW).put("topOffsetTwinHidden", (DISC_LINE_GAP / 2f).toInt()).put("dynPref", IOB_TEXT)
         text(COB_VIEW, discLine(DISC_LINE_GAP / 2f), DISC_SIZE, "center", p.ink)
-            .put("twinView", IOB_VIEW).put("topOffsetTwinHidden", -(DISC_LINE_GAP / 2f).toInt())
+            .put("twinView", IOB_VIEW).put("topOffsetTwinHidden", -(DISC_LINE_GAP / 2f).toInt()).put("dynPref", COB_TEXT)
         if (animated) {
             // The sun and the moon on their round, a cloud over each in that weather; all see-through while the disc shows IOB or COB
             for ((view, key, size, picture) in listOf(
@@ -290,20 +298,23 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
             .put(PHONE_HAND_DYN, batteryHandDynData(PHONE_VALUE_KEY))
             .apply { if (animated) put(WATCH_HAND_DYN, batteryHandDynData(WatchBatteryLevel.KEY)) }
 
-        // What the settings of the watch change: the disc, and the units of the scale
+        // What the settings of the watch change: the disc, and the units of the scale. In the disc a
+        // complication wins over IOB and COB, and they win over the sky.
         put("dynPref", JSONObject().apply {
-            whenDiscShowsValues(DISC_CHART, always(JSONObject().put("image1", SUB_DIAL).put("invalidImage", SUB_DIAL)))
-            whenDiscShowsValues(DISC_PLATE, always(JSONObject().put("image1", COVER_PLATE_OPEN).put("invalidImage", COVER_PLATE_OPEN)))
-            if (animated) whenDiscShowsValues(DISC_HIDE, always(JSONObject().put("color1", CLEAR).put("invalidColor", CLEAR)))
+            val window = picture(SUB_DIAL)
+            val open = picture(COVER_PLATE_OPEN)
+            val clear = always(JSONObject().put("color1", CLEAR).put("invalidColor", CLEAR))
+            val noText = always(JSONObject().put("fontColor1", CLEAR).put("invalidFontColor", CLEAR))
+            prefChain(DISC_CHART, listOf(COMPLICATION_PREF to picture(BLANK), IOB_PREF to window, COB_PREF to window))
+            prefChain(DISC_PLATE, listOf(COMPLICATION_PREF to open, IOB_PREF to open, COB_PREF to open))
+            if (animated) prefChain(DISC_HIDE, listOf(COMPLICATION_PREF to clear, IOB_PREF to clear, COB_PREF to clear))
+            // Detailed IOB, "(0.90|0.35)", is longer: smaller, so it fits the disc
+            prefChain(IOB_TEXT, listOf(COMPLICATION_PREF to noText, DETAIL_PREF to always(JSONObject().put("textsize1", DETAIL_SIZE).put("invalidTextSize", DETAIL_SIZE))))
+            prefChain(COB_TEXT, listOf(COMPLICATION_PREF to noText))
             put(
                 UNITS, JSONObject().put("prefKey", JsonKeyValues.PREF_UNITS.key)
                     .put("true", always(JSONObject().put("image1", SCALE_MGDL).put("invalidImage", SCALE_MGDL)))
                     .put("false", always(JSONObject().put("image1", SCALE_MMOL).put("invalidImage", SCALE_MMOL)))
-            )
-            // Detailed IOB, "(0.90|0.35)", is longer: smaller, so it fits the disc
-            put(
-                IOB_DETAIL, JSONObject().put("prefKey", CwfMetadataKey.CWF_PREF_WATCH_SHOW_DETAILED_IOB.key)
-                    .put("true", always(JSONObject().put("textsize1", DETAIL_SIZE).put("invalidTextSize", DETAIL_SIZE)))
             )
         })
 
@@ -335,17 +346,20 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
      */
     private fun always(answer: JSONObject): JSONObject = answer.put("valueKey", "day").put("minData", 0).put("maxData", 32)
 
+    /** A dynPref answer: the picture [name], whatever the value. */
+    private fun picture(name: String): JSONObject = always(JSONObject().put("image1", name).put("invalidImage", name))
+
     /**
-     * Two dynPref blocks: [name] gives [answer] while the disc shows IOB or COB (Show IOB on, or else
-     * Show COB on), and nothing otherwise, so the view keeps its own picture. Plain AAPS follows the
-     * chain from the first block to the second with the `dynPref` key.
+     * dynPref blocks that ask the settings of [steps] in turn: the first one that is on gives its
+     * answer; when none is on there is no answer, so the view keeps its own look. Block [name] asks the
+     * first, `<name>2` the second and so on; plain AAPS goes from one to the next with the `dynPref` key.
      */
-    private fun JSONObject.whenDiscShowsValues(name: String, answer: JSONObject) {
-        put(
-            name, JSONObject().put("prefKey", CwfMetadataKey.CWF_PREF_WATCH_SHOW_IOB.key)
-                .put("true", answer).put("false", JSONObject().put("dynPref", "${name}Cob"))
-        )
-        put("${name}Cob", JSONObject().put("prefKey", CwfMetadataKey.CWF_PREF_WATCH_SHOW_COB.key).put("true", JSONObject(answer.toString())))
+    private fun JSONObject.prefChain(name: String, steps: List<Pair<String, JSONObject>>) {
+        steps.forEachIndexed { i, (prefKey, answer) ->
+            val block = JSONObject().put("prefKey", prefKey).put("true", JSONObject(answer.toString()))
+            if (i < steps.lastIndex) block.put("false", JSONObject().put("dynPref", "$name${i + 2}"))
+            put(if (i == 0) name else "$name${i + 1}", block)
+        }
     }
 
     private data class Quad(val view: String, val key: String, val size: Int, val picture: String)
@@ -796,6 +810,8 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         face.refreshRenderData()
         val picture = face.renderToBitmap(400, 400)
         drawComplicationValues(Canvas(picture), lookOf(design, weather))
+        // The watch draws the slots under the views: here they come after, which is the same where the views are see-through
+        if (options.complication) drawSlot(Canvas(picture), design.getJSONObject(DISC_SLOT), health(HealthKind.HEART_RATE, HEART_SAMPLE, ComplicationType.SHORT_TEXT))
         return picture
     }
 
@@ -840,8 +856,11 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         assertThat(metadata[CwfMetadataKey.CWF_NAME]).isEqualTo(displayName)
         assertThat(metadata[CwfMetadataKey.CWF_FILENAME]).isEqualTo(fileName)
         assertThat(metadata[CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION2]).isEqualTo("true")
-        for (key in listOf(CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION1, CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION3, CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION4, CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION5))
-            assertWithMessage("$key").that(metadata[key]).isEqualTo("false")
+        // No setting that changes nothing here, and none the wearer chooses: the phone lists them all
+        assertThat(metadata.keys.filter { it.isPref }).containsExactly(
+            CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION2, CwfMetadataKey.CWF_PREF_WATCH_SHOW_DATE,
+            CwfMetadataKey.CWF_PREF_WATCH_SHOW_DELTA, CwfMetadataKey.CWF_PREF_WATCH_SHOW_AVG_DELTA
+        )
         for (key in listOf(CwfMetadataKey.CWF_PREF_WATCH_SHOW_DELTA, CwfMetadataKey.CWF_PREF_WATCH_SHOW_AVG_DELTA, CwfMetadataKey.CWF_PREF_WATCH_SHOW_DATE))
             assertWithMessage("$key").that(metadata[key]).isEqualTo("true")
         // The font is in the zip, and every text uses it
@@ -1151,12 +1170,14 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         val instant = if (animated) AFTERNOON_MS else previewInstant
         val cases = listOf(
             (if (animated) "sky (IOB and COB off)" else "no disc (IOB and COB off)") to Options(), "IOB" to Options(iob = true), "COB" to Options(cob = true),
-            "IOB and COB" to Options(iob = true, cob = true), "detailed IOB and COB" to Options(iob = true, cob = true, detailedIob = true)
+            "IOB and COB" to Options(iob = true, cob = true), "detailed IOB and COB" to Options(iob = true, cob = true, detailedIob = true),
+            "complication (heart rate)" to Options(complication = true), "complication, IOB and COB on" to Options(iob = true, cob = true, complication = true)
         )
         val pictures = cases.map { (name, options) -> name to render(instant, options = options) }
         sheet(pictures, "${fileName}_disc.png")
         sheet(pictures.map { (name, picture) -> name to Bitmap.createBitmap(picture, 40, 134, 104, 104) }, "${fileName}_disc-zoom.png")
         val (sky, iob, cob, both, detailed) = pictures.map { it.second }
+        val withSlot = pictures[5].second
         val ink = palette.ink
         val upper = discRow(-DISC_LINE_GAP / 2f)
         val middle = discRow(0f)
@@ -1186,6 +1207,25 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         // No land over the texts: the window goes down to the bottom of the disc
         val low = Pair(SKY_X, SKY_Y + SKY_R - 6f)
         assertWithMessage("no land").that(near(around(both, low, 0).single(), palette.window, 12)).isTrue()
+        // A complication: its round window and its value fill the disc
+        assertWithMessage("complication window").that(near(around(withSlot, skyPoint, 0).single(), palette.window, 12)).isTrue()
+        assertWithMessage("complication value").that(pixelsNear(withSlot, middle, ink)).isGreaterThan(15)
+        // It wins over IOB and COB. A render-only face always takes the complication settings as off
+        // (CustomWatchface.prefBoolean), so this is checked on the dynPref chains, the way the watch reads them
+        val dynPref = design(defaultDesign()).getJSONObject("dynPref")
+        fun answer(block: String, vararg on: String) = resolveDynPref(dynPref, block, on.toSet())
+        for (on in listOf(arrayOf(COMPLICATION_PREF), arrayOf(COMPLICATION_PREF, IOB_PREF, COB_PREF, DETAIL_PREF))) {
+            assertThat(answer(DISC_CHART, *on)?.getString("image1")).isEqualTo(BLANK)
+            assertThat(answer(DISC_PLATE, *on)?.getString("image1")).isEqualTo(COVER_PLATE_OPEN)
+            assertThat(answer(IOB_TEXT, *on)?.getString("fontColor1")).isEqualTo(CLEAR)
+            assertThat(answer(COB_TEXT, *on)?.getString("fontColor1")).isEqualTo(CLEAR)
+            if (animated) assertThat(answer(DISC_HIDE, *on)?.getString("color1")).isEqualTo(CLEAR)
+        }
+        // Without it: IOB or COB give the window, detailed IOB a smaller text, nothing on gives no answer
+        assertThat(answer(DISC_CHART, COB_PREF)?.getString("image1")).isEqualTo(SUB_DIAL)
+        assertThat(answer(IOB_TEXT, IOB_PREF, DETAIL_PREF)?.getInt("textsize1")).isEqualTo(DETAIL_SIZE)
+        assertThat(answer(COB_TEXT, COB_PREF)).isNull()
+        assertThat(answer(DISC_CHART)).isNull()
         if (animated) {
             // The sun is in the sky of the afternoon, and gone while the disc shows a value
             val sun = skyOrbit(JsonKeyValues.SUN_CYCLE.key).point(DayNightClock(location = { null }).sunCycle(AFTERNOON_MS))
@@ -1193,6 +1233,20 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
             for ((name, picture) in listOf("IOB" to iob, "COB" to cob, "both" to both)) assertWithMessage("no sun with $name").that(countNear(picture, sun, 4, "#FFC93A", 50)).isEqualTo(0)
         }
         storeSampleData(newFace())
+    }
+
+    /**
+     * What a dynPref [block] gives with the settings [on] switched on (every other one off), followed
+     * from block to block as `CustomWatchface.buildDynPrefs` does; null when there is no answer.
+     */
+    private fun resolveDynPref(dynPref: JSONObject, block: String, on: Set<String>): JSONObject? {
+        var name = block
+        repeat(10) {
+            val json = dynPref.getJSONObject(name)
+            val next = json.optJSONObject((json.getString("prefKey") in on).toString()) ?: return null
+            name = next.optString("dynPref").takeIf { it.isNotEmpty() } ?: return next
+        }
+        error("dynPref $block does not end")
     }
 
     @Test
@@ -1258,7 +1312,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         }
         for (entry in design.getJSONObject("dynData").keys()) dynKeysKnown("dynData $entry", design.getJSONObject("dynData").getJSONObject(entry))
         // dynPref blocks: a preference plain AAPS knows, and answers made of known keys
-        val prefs = setOf(CwfMetadataKey.CWF_PREF_WATCH_SHOW_IOB.key, CwfMetadataKey.CWF_PREF_WATCH_SHOW_COB.key, CwfMetadataKey.CWF_PREF_WATCH_SHOW_DETAILED_IOB.key, JsonKeyValues.PREF_UNITS.key)
+        val prefs = setOf(COMPLICATION_PREF, IOB_PREF, COB_PREF, DETAIL_PREF, JsonKeyValues.PREF_UNITS.key)
         val dynPref = design.getJSONObject("dynPref")
         for (entry in dynPref.keys()) {
             val block = dynPref.getJSONObject(entry)
@@ -1352,6 +1406,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         const val STEPS_SIZE = 24
         const val STEPS_VIEW = "complication2"
         const val STEPS_SAMPLE = 6482L
+        const val HEART_SAMPLE = 72L
 
         /** The sky disc at 9 o'clock: its middle, its size, the horizon and the round of the sun and the moon. */
         const val SKY_X = 92f
@@ -1378,6 +1433,8 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         const val DISC_TEXT_WIDTH = 84f
         /** Detailed IOB, "(0.90|0.35)": smaller, so it fits. */
         const val DETAIL_SIZE = 13
+        /** The ring of a complication with a range, along the inside of the disc. */
+        const val DISC_RING = 4
 
         /** The two power reserves at 4:30 and 7:30: the watch left, the phone right. */
         const val WATCH_X = 90f
@@ -1402,6 +1459,8 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         const val WATCH_HAND_VIEW = "delta"
         const val PHONE_HAND_VIEW = "avg_delta"
         const val IOB_VIEW = "iob2"
+        /** The complication slot of the disc. */
+        const val DISC_SLOT = "complication1"
         const val COB_VIEW = "cob2"
         /** A text view no setting hides, with a transparent text: it only shows its picture. */
         const val SCALE_VIEW = "hour"
@@ -1416,14 +1475,21 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         const val DISC_PLATE = "discPlate"
         const val DISC_HIDE = "discHide"
         const val UNITS = "units"
-        const val IOB_DETAIL = "iobDetail"
+        const val IOB_TEXT = "iobText"
+        const val COB_TEXT = "cobText"
+
+        /** The settings the disc follows. */
+        val COMPLICATION_PREF = CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION1.key
+        val IOB_PREF = CwfMetadataKey.CWF_PREF_WATCH_SHOW_IOB.key
+        val COB_PREF = CwfMetadataKey.CWF_PREF_WATCH_SHOW_COB.key
+        val DETAIL_PREF = CwfMetadataKey.CWF_PREF_WATCH_SHOW_DETAILED_IOB.key
 
         const val FONT_LICENCE = "BodoniModa-OFL.txt"
 
         const val COMMENT = "A dress watch: glucose scale and window, sun and moon over a horizon, date, steps and two power reserves. " +
-            "Show IOB or Show COB (watch settings, Display) puts them in the sky disc. The scale follows the units of the phone. No graph, no seconds"
+            "Complication 1 (settings of the face), or Show IOB or Show COB (watch settings, Display), puts it in the sky disc. The scale follows the units of the phone. No graph, no seconds"
         const val STOCK_COMMENT = "A dress watch: glucose scale and window, a disc for IOB and COB, date, steps and the phone power reserve. " +
-            "Show IOB and Show COB (watch: AAPS, Settings, Display) choose what the disc shows; with both off there is no disc. " +
+            "The disc shows complication 1 (settings of the watch face) or else IOB and COB (watch: AAPS, Settings, Display, Show IOB and Show COB); with all off there is no disc. " +
             "The scale follows the units of the phone (mmol/L or mg/dL). No graph, no seconds. " +
             "Copy for AAPS 4.0: no wake animation, no sun, moon or weather, no watch power reserve."
 

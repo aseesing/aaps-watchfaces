@@ -12,7 +12,7 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * The day face of "Grand Complication" for plain AAPS 4.0 (`Grand_Complication_Day_AAPS4.zip`): the colours of
  * [CwfGrandDayDesignTest], without the wake-up animation, the sun, the moon, the weather and the watch battery.
- * The disc shows IOB and COB; with both off it is not there. See [GrandComplicationDesignBase].
+ * The disc shows complication 1, or IOB and COB; with all off it is not there. See [GrandComplicationDesignBase].
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
