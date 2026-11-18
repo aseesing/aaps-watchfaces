@@ -28,6 +28,7 @@ import app.aaps.shared.impl.weardata.ViewKeys
 import app.aaps.shared.impl.weardata.ZipWatchfaceFormat
 import app.aaps.wear.R
 import app.aaps.wear.phonepreview.DesignAccess
+import app.aaps.wear.phonepreview.WatchLineSpacing
 import app.aaps.wear.watchfaces.animation.LayerAnimator
 import app.aaps.wear.watchfaces.animation.WakeAnimationJson
 import app.aaps.wear.watchfaces.animation.WakeAnimationSpec
@@ -576,33 +577,14 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         storeSampleData(face, sample)
         Thread.sleep(600)   // past the render data share window
         face.refreshRenderData()
-        face.renderToBitmap(size, size) // makes the views
-        likeOnTheWatch(face.layoutView!!)
+        // Lines placed as on the watch, the same way the phone preview does it: the watch app targets
+        // Android 11, where a text of one line starts at the top of the font box (see WatchLineSpacing)
+        val first = face.renderToBitmap(size, size)
+        if (!WatchLineSpacing.match(face.layoutView!!)) return face to first
+        first.recycle()
         return face to face.renderToBitmap(size, size)
     }
 
-    /**
-     * Makes the text views under [root] lay out their lines as on a watch. The watch app targets
-     * Android 11 (`wearTargetSdk` 30 in AAPS), and Android keeps old behaviour for such apps: there a
-     * one-line text (`BoringLayout`) gets no fallback line spacing, so it starts at the top of the font
-     * box, while a longer text (`StaticLayout`) starts at the ascent when that is higher. Apps for
-     * Android 13 and newer (compat change 210923482, `TextView.BORINGLAYOUT_FALLBACK_LINESPACING`) use
-     * the ascent for both, and so do these tests (Robolectric turns every compat change on) and the
-     * phone preview. A text view keeps this in `mUseFallbackLineSpacing`: 1 for `StaticLayout` only,
-     * 2 for both; set to 1 here, and its layouts made again.
-     */
-    private fun likeOnTheWatch(root: View) {
-        val mode = TextView::class.java.getDeclaredField("mUseFallbackLineSpacing").apply { isAccessible = true }
-        val nullLayouts = TextView::class.java.getDeclaredMethod("nullLayouts").apply { isAccessible = true }
-        fun visit(view: View) {
-            if (view is TextView) {
-                mode.setInt(view, STATIC_LAYOUT_ONLY)
-                nullLayouts.invoke(view)
-            }
-            if (view is ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
-        }
-        visit(root)
-    }
 
     /** The design without the snow of the second hand (stock), which would lie over the digits by chance. */
     private fun withoutSnow(design: JSONObject) {
@@ -880,7 +862,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
     /**
      * The snow lies on its digits at every real screen size, for the time and for the glucose: per
      * digit, sideways and in height, as when the digit and its cap are drawn alone at that size. The
-     * faces lay their text out as the watch does ([likeOnTheWatch]): there the snow on the time once lay
+     * faces lay their text out as the watch does (`WatchLineSpacing`): there the snow on the time once lay
      * 7 px too high, since a one-line text started at the top of the font box. The watch places each
      * view and each character on whole pixels, so two views that share a place in the design can come
      * apart at some sizes; a view that ends at its digits (gravity right) was 2.7 px off at 450 px.
@@ -1437,9 +1419,6 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
          * `timeLefts`).
          */
         const val SIDEWAYS_TOLERANCE = CAP_TOLERANCE + 1f
-
-        /** `TextView.mUseFallbackLineSpacing` of an app that targets Android 9 to 12: fallback line spacing for `StaticLayout` only. */
-        const val STATIC_LAYOUT_ONLY = 1
 
         /**
          * How far the height of the snow on a digit may be from the expected one, in pixels: both edges
