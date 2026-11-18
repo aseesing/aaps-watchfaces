@@ -15,7 +15,7 @@ import app.aaps.core.interfaces.rx.weardata.EventData
 import app.aaps.shared.impl.weardata.JsonKeyValues
 import app.aaps.shared.impl.weardata.ResFileMap
 import app.aaps.wear.watchfaces.daynight.DayNightClock
-import app.aaps.wear.watchfaces.daynight.DayOverlay
+import app.aaps.wear.watchfaces.design.LegacyDesign
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import org.json.JSONObject
@@ -130,7 +130,7 @@ class CwfYellowDesignTest : CyberpunkDesignBase() {
     @Test
     fun theTextsOnYellowAreDarkAndThePanelsKeepTheNightColours() {
         val design = design(defaultDesign())
-        assertThat(design.has(DayOverlay.WEATHER_KEY)).isFalse()
+        assertThat(design.has(LegacyDesign.WEATHER_LOOKS_KEY)).isFalse()
         // The texts on yellow are dark, with enough contrast
         for (key in listOf("hour", "minute", "day", WATCH_NUMBER_VIEW, PHONE_NUMBER_VIEW))
             assertWithMessage(key).that(contrast(design.getJSONObject(key).getString("fontColor"), YELLOW)).isAtLeast(7.0)

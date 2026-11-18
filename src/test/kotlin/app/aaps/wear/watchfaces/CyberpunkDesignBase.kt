@@ -30,9 +30,10 @@ import app.aaps.shared.impl.weardata.ResFileMap
 import app.aaps.shared.impl.weardata.ZipWatchfaceFormat
 import app.aaps.wear.R
 import app.aaps.wear.health.HealthKind
-import app.aaps.wear.watchfaces.animation.BlinkSpec
-import app.aaps.wear.watchfaces.daynight.DayOverlay
-import app.aaps.wear.watchfaces.daynight.Orbit
+import app.aaps.wear.watchfaces.animation.LayerSlot
+import app.aaps.wear.watchfaces.animation.LayerSource
+import app.aaps.wear.watchfaces.design.LegacyDesign
+import app.aaps.wear.watchfaces.design.LegacyDesign.Orbit
 import app.aaps.wear.watchfaces.utils.GlucoseLine
 import app.aaps.wear.watchfaces.utils.WatchBatteryLevel
 import com.google.common.truth.Truth.assertThat
@@ -61,7 +62,7 @@ import kotlin.math.sqrt
  * The designs are separate faces; the wearer picks one for the day and one for the night in AAPS, and
  * the watch switches between the two whole designs at sunrise and sunset. So no design has a day
  * look (`dayLook`) any more. A design may still have looks for the weather (`weatherLooks`), keyed
- * by the weather alone (`partly`, `cloudy`, `rain`), see [DayOverlay.apply].
+ * by the weather alone (`partly`, `cloudy`, `rain`), see `DayOverlay.apply` (now `LegacyDesign`).
  *
  * - [CwfTechDesignTest]: "Cyberpunk Tech", the dark neon HUD with the moon on the edge.
  * - [CwfYellowDesignTest]: "Cyberpunk Yellow", signal yellow with black panels and the sun.
@@ -841,11 +842,11 @@ abstract class CyberpunkDesignBase : CwfDesignBase() {
 
         // A whole design for day or night: no day look, and weather looks only by the weather alone
         assertThat(design.has("dayLook")).isFalse()
-        design.optJSONObject(DayOverlay.WEATHER_KEY)?.keys()?.forEach {
+        design.optJSONObject(LegacyDesign.WEATHER_LOOKS_KEY)?.keys()?.forEach {
             assertWithMessage("weather look $it").that(it).isIn(listOf(EventData.Weather.PARTLY, EventData.Weather.CLOUDY, EventData.Weather.RAIN))
         }
         // No picture ends with "Day": the watch would show it in the place of another one
-        for (name in images.keys) assertWithMessage(name).that(name.endsWith(DayOverlay.IMAGE_SUFFIX)).isFalse()
+        for (name in images.keys) assertWithMessage(name).that(name.endsWith(LegacyDesign.DAY_SUFFIX)).isFalse()
 
         // The phone accepts it: it needs a name and a preview image
         val loaded = ZipWatchfaceFormat.loadCustomWatchface(zip, "$fileName.zip", authorization = true)
@@ -871,9 +872,9 @@ abstract class CyberpunkDesignBase : CwfDesignBase() {
         assertThat(loaded.cwfData.resData.keys).containsAtLeastElementsIn(batteryImages().keys)
         if (fontFile.exists()) assertThat(loaded.cwfData.resData[CUSTOM_FONT]?.format).isEqualTo(ResFormat.TTF)
         // Every picture a look swaps in is in the zip
-        design.optJSONObject(DayOverlay.WEATHER_KEY)?.let { weatherLooks ->
+        design.optJSONObject(LegacyDesign.WEATHER_LOOKS_KEY)?.let { weatherLooks ->
             weatherLooks.keys().forEach { weather ->
-                weatherLooks.getJSONObject(weather).optJSONObject(DayOverlay.IMAGES_KEY)?.let { swaps ->
+                weatherLooks.getJSONObject(weather).optJSONObject(LegacyDesign.IMAGES_KEY)?.let { swaps ->
                     swaps.keys().forEach { assertWithMessage("$weather $it").that(loaded.cwfData.resData.keys).contains(swaps.getString(it)) }
                 }
             }
@@ -997,7 +998,7 @@ abstract class CyberpunkDesignBase : CwfDesignBase() {
         val face = newFace()
         storeSampleData(face, graph = ::dayOfGlucose)
         val plain = preview(design, default, images, previewInstant)
-        runBlocking { face.complicationDataRepository.updateTreatmentData(dayOfTempBasals(System.currentTimeMillis())) }
+        runBlocking { face.complicationDataRepository.updateTreatmentData(dayOfTempBasals(previewInstant)) }
         val withBasal = preview(design, default, images, previewInstant)
         sheet(listOf("glucose" to plain, "with temp basals" to withBasal), "${fileName}_basal.png")
         assertWithMessage("line pixels without temp basals").that(linePixels(plain)).isGreaterThan(300)
@@ -1043,14 +1044,15 @@ abstract class CyberpunkDesignBase : CwfDesignBase() {
             // Every value is inside the safe limits, so nothing is changed on the watch
             assertWithMessage("$weather").that(spec.normalized().withoutImage()).isEqualTo(spec.withoutImage())
             assertWithMessage("$weather duration").that(spec.durationMs).isEqualTo(ANIMATION_MS)
-            assertWithMessage("$weather rain").that(spec.rain != null).isEqualTo(hasRain(weather))
-            assertWithMessage("$weather glitch").that(spec.glitch != null).isEqualTo(hasGlitch(weather))
+            assertWithMessage("$weather rain").that(uses(look, "rain").isNotEmpty()).isEqualTo(hasRain(weather))
+            assertWithMessage("$weather glitch").that(uses(look, "glitch").isNotEmpty()).isEqualTo(hasGlitch(weather))
             // The beating drop, with its picture
-            assertWithMessage("$weather pulse").that(spec.pulse?.drawable).isNotNull()
+            assertWithMessage("$weather pulse").that(lookImages(look, images)[uses(look, "pulse").single().getString("image")]).isNotNull()
+            assertWithMessage("$weather pulse layer").that(spec.layers.any { (it.source as? LayerSource.Image)?.drawable != null && it.slot == LayerSlot.FRONT }).isTrue()
             // Each battery, icon and number, blinks at 20 % or less
-            assertWithMessage("$weather blink").that(spec.blink).containsExactly(
-                BlinkSpec(listOf(WATCH_ICON_VIEW, WATCH_NUMBER_VIEW), WatchBatteryLevel.KEY, BATT_LOW),
-                BlinkSpec(listOf(PHONE_ICON_VIEW, PHONE_NUMBER_VIEW), PHONE_VALUE_KEY, BATT_LOW)
+            assertWithMessage("$weather blink").that(blinks(look)).containsExactly(
+                Triple(WATCH_ICON_VIEW, WatchBatteryLevel.KEY, BATT_LOW), Triple(WATCH_NUMBER_VIEW, WatchBatteryLevel.KEY, BATT_LOW),
+                Triple(PHONE_ICON_VIEW, PHONE_VALUE_KEY, BATT_LOW), Triple(PHONE_NUMBER_VIEW, PHONE_VALUE_KEY, BATT_LOW)
             )
         }
     }

@@ -28,7 +28,7 @@ import app.aaps.wear.watchfaces.animation.DesignRect
 import app.aaps.wear.watchfaces.animation.WakeAnimator
 import app.aaps.wear.watchfaces.animation.WakeTimer
 import app.aaps.wear.watchfaces.daynight.DayNightClock
-import app.aaps.wear.watchfaces.daynight.DayOverlay
+import app.aaps.wear.watchfaces.design.LegacyDesign
 import app.aaps.wear.watchfaces.daynight.MoonPicture
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
@@ -94,7 +94,7 @@ class CwfTechDesignTest : CyberpunkDesignBase() {
         // place in the json is the middle of its way; the watch moves it (see orbit).
         val top = orbit(JsonKeyValues.NIGHT_PROGRESS.key).point(0.5)
         place("freetext4", (top.first - MOON_SIZE / 2f).toInt(), (top.second - MOON_SIZE / 2f).toInt(), MOON_SIZE)
-            .put("textvalue", "").put(MoonPicture.JSON_KEY, true).put("orbit", orbitJson(JsonKeyValues.NIGHT_PROGRESS.key))
+            .put("textvalue", "").put(LegacyDesign.MOON_LIGHT_KEY, true).put("orbit", orbitJson(JsonKeyValues.NIGHT_PROGRESS.key))
         // A cloud in front of the moon, only when the weather is cloudy (see the weather looks)
         place("patient_name", (top.first - CLOUD_SIZE / 2f).toInt(), (top.second - CLOUD_SIZE / 2f).toInt(), CLOUD_SIZE)
             .put("visibility", "gone").put("textvalue", "").put("fontColor", CLEAR).put("background", CLOUD_NIGHT_PARTLY)
@@ -105,7 +105,7 @@ class CwfTechDesignTest : CyberpunkDesignBase() {
 
         // A cloud covers part (partly) or most (cloudy, rain) of the moon
         put(
-            DayOverlay.WEATHER_KEY, JSONObject()
+            LegacyDesign.WEATHER_LOOKS_KEY, JSONObject()
                 .put(EventData.Weather.PARTLY, cloud(CLOUD_NIGHT_PARTLY))
                 .put(EventData.Weather.CLOUDY, cloud(CLOUD_NIGHT_FULL))
                 .put(EventData.Weather.RAIN, cloud(CLOUD_NIGHT_FULL))
@@ -154,7 +154,7 @@ class CwfTechDesignTest : CyberpunkDesignBase() {
     @Test
     fun theWatchDrawsTheMoon() {
         val moon = design(defaultDesign()).getJSONObject("freetext4")
-        assertThat(moon.optBoolean(MoonPicture.JSON_KEY)).isTrue()
+        assertThat(moon.optBoolean(LegacyDesign.MOON_LIGHT_KEY)).isTrue()
         assertThat(moon.has("dynData")).isFalse()
         assertThat(moon.getInt("width")).isEqualTo(MOON_SIZE)
         assertThat(images().keys.filter { it.startsWith("Moon") }).isEmpty()
@@ -374,15 +374,16 @@ class CwfTechDesignTest : CyberpunkDesignBase() {
     fun rainKeepsTheTableReadable() {
         val png = images()[ResFileMap.BACKGROUND.fileName]!!
         val bitmap = BitmapFactory.decodeByteArray(png, 0, png.size)
-        val rain = readAnimation(design(defaultDesign())).rain!!
+        val rain = uses(design(defaultDesign()), "rain").single()
+        val rainColor = Color.parseColor(rain.getString("color"))
         // The brightest a streak gets: its colour at full alpha, the streak's own alpha (at most 1) and the full fade
-        val alpha = Color.alpha(rain.color) / 255.0 * rain.alpha / 255.0
+        val alpha = Color.alpha(rainColor) / 255.0 * rain.getInt("alpha") / 255.0
         fun blend(under: Int, over: Int) = (over * alpha + under * (1 - alpha)).toInt()
         var worst = 0.0
         for (y in (TABLE_TOP * 2) until (TABLE_BOTTOM * 2) step 2)
             for (x in (TABLE_LEFT * 2) until (VAL_RIGHT * 2) step 2) {
                 val under = bitmap.getPixel(x, y)
-                val lit = Color.rgb(blend(Color.red(under), Color.red(rain.color)), blend(Color.green(under), Color.green(rain.color)), blend(Color.blue(under), Color.blue(rain.color)))
+                val lit = Color.rgb(blend(Color.red(under), Color.red(rainColor)), blend(Color.green(under), Color.green(rainColor)), blend(Color.blue(under), Color.blue(rainColor)))
                 worst = max(worst, luminance(lit))
             }
         assertWithMessage("brightest pixel behind the table under a rain streak").that(worst).isLessThan(0.06)
@@ -577,13 +578,18 @@ class CwfTechDesignTest : CyberpunkDesignBase() {
         assertThat(spec.durationMs).isEqualTo(ANIMATION_MS)
         assertThat(spec.fps).isEqualTo(24)
         assertThat(spec.fadeMs).isEqualTo(600)
-        val rain = spec.rain!!
-        assertThat(rain.count).isEqualTo(140)
-        assertThat(rain.color).isEqualTo(Color.parseColor(RAIN_COLOR))
+        assertThat(spec.errors).isEmpty()
+        val rain = uses(design, "rain").single()
+        assertThat(rain.getInt("count")).isEqualTo(140)
+        assertThat(Color.parseColor(rain.getString("color"))).isEqualTo(Color.parseColor(RAIN_COLOR))
         // Slanted 1 to the left for 4 down, the look the design was made with
-        assertThat(rain.angle.toDouble()).isWithin(0.5).of(Math.toDegrees(atan(-0.25)))
-        val pulse = spec.pulse!!
-        assertThat(pulse.drawable).isNotNull()
+        assertThat(rain.getDouble("angle")).isWithin(0.5).of(Math.toDegrees(atan(-0.25)))
+        val use = uses(design, "pulse").single()
+        assertThat(images()[use.getString("image")]).isNotNull()
+        val pulse = object {
+            val rect = DesignRect(use.getDouble("left").toFloat(), use.getDouble("top").toFloat(), use.getDouble("width").toFloat(), use.getDouble("height").toFloat())
+            val amplitude = use.getDouble("amplitude").toFloat()
+        }
         assertThat(pulse.rect).isEqualTo(DesignRect(51.625f, 201.458f, 30.083f, 44.333f))
         // The picture has the shape of its box
         val png = images()[LOGO_PULSE]!!

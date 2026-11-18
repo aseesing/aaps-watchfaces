@@ -24,11 +24,10 @@ import app.aaps.shared.impl.weardata.JsonKeyValues
 import app.aaps.shared.impl.weardata.ResFileMap
 import app.aaps.shared.impl.weardata.ZipWatchfaceFormat
 import app.aaps.wear.health.HealthKind
-import app.aaps.wear.watchfaces.animation.BlinkSpec
 import app.aaps.wear.watchfaces.daynight.DayNightClock
-import app.aaps.wear.watchfaces.daynight.DayOverlay
+import app.aaps.wear.watchfaces.design.LegacyDesign
 import app.aaps.wear.watchfaces.daynight.MoonPicture
-import app.aaps.wear.watchfaces.daynight.Orbit
+import app.aaps.wear.watchfaces.design.LegacyDesign.Orbit
 import app.aaps.wear.watchfaces.utils.WatchBatteryLevel
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
@@ -216,7 +215,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         // The moon is drawn by the watch from its photo, lit and turned as it is in the sky now (see MoonPicture)
         val moonTop = skyOrbit(JsonKeyValues.MOON_CYCLE.key).point(0.25)
         place(MOON_VIEW, (moonTop.first - MOON_DISC / 2f).toInt(), (moonTop.second - MOON_DISC / 2f).toInt(), MOON_DISC)
-            .put("textvalue", "").put(MoonPicture.JSON_KEY, true).put("orbit", skyOrbitJson(JsonKeyValues.MOON_CYCLE.key))
+            .put("textvalue", "").put(LegacyDesign.MOON_LIGHT_KEY, true).put("orbit", skyOrbitJson(JsonKeyValues.MOON_CYCLE.key))
 
         // The glucose hand on its scale, and the two battery hands: pictures that the watch turns with the value
         picture(BG_HAND_VIEW, FAN_X, FAN_Y, BG_HAND_BOX, BG_HAND).put("rotationOffset", true).put("dynData", BG_HAND_DYN)
@@ -243,10 +242,10 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         )
 
         // The weather: a cloud over the sun and the moon, a grey sky when it is cloudy or rains
-        put(DayOverlay.WEATHER_KEY, JSONObject().apply {
-            put(EventData.Weather.PARTLY, JSONObject().put(DayOverlay.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_PARTLY)))
-            put(EventData.Weather.CLOUDY, JSONObject().put(DayOverlay.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_CLOUDY).put(ResFileMap.COVER_CHART.fileName, SKY_CLOUDY)))
-            put(EventData.Weather.RAIN, JSONObject().put(DayOverlay.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_RAIN).put(ResFileMap.COVER_CHART.fileName, SKY_RAIN)))
+        put(LegacyDesign.WEATHER_LOOKS_KEY, JSONObject().apply {
+            put(EventData.Weather.PARTLY, JSONObject().put(LegacyDesign.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_PARTLY)))
+            put(EventData.Weather.CLOUDY, JSONObject().put(LegacyDesign.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_CLOUDY).put(ResFileMap.COVER_CHART.fileName, SKY_CLOUDY)))
+            put(EventData.Weather.RAIN, JSONObject().put(LegacyDesign.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_RAIN).put(ResFileMap.COVER_CHART.fileName, SKY_RAIN)))
         })
     }
 
@@ -684,7 +683,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         println("$fileName.zip: ${zip.size} bytes")
         assertThat(zip.size).isAtMost(MAX_ZIP_BYTES)
         // No picture ends with "Day": the watch would show it in the place of another one
-        for (name in images.keys) assertWithMessage(name).that(name.endsWith(DayOverlay.IMAGE_SUFFIX)).isFalse()
+        for (name in images.keys) assertWithMessage(name).that(name.endsWith(LegacyDesign.DAY_SUFFIX)).isFalse()
 
         val loaded = ZipWatchfaceFormat.loadCustomWatchface(zip, "$fileName.zip", authorization = true)
         assertThat(loaded).isNotNull()
@@ -701,9 +700,9 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         for (key in listOf("sgv", "timestamp", "loop", "day_name", "day", STEPS_VIEW)) assertWithMessage(key).that(design.getJSONObject(key).getString("font")).isEqualTo(FONT)
         // Every picture a view, a dynData or a weather look names is in the zip
         assertThat(loaded.cwfData.resData.keys).containsAtLeastElementsIn(images.keys)
-        design.getJSONObject(DayOverlay.WEATHER_KEY).let { weatherLooks ->
+        design.getJSONObject(LegacyDesign.WEATHER_LOOKS_KEY).let { weatherLooks ->
             weatherLooks.keys().forEach { weather ->
-                weatherLooks.getJSONObject(weather).getJSONObject(DayOverlay.IMAGES_KEY).let { swaps ->
+                weatherLooks.getJSONObject(weather).getJSONObject(LegacyDesign.IMAGES_KEY).let { swaps ->
                     swaps.keys().forEach { assertWithMessage("$weather $it").that(images.keys).containsAtLeast(it, swaps.getString(it)) }
                 }
             }
@@ -962,14 +961,15 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         }
         sheet(pictures, "${fileName}_batteries.png")
         // A low battery blinks while the wake-up animation plays, and nothing else moves
-        val spec = readAnimation(design(defaultDesign()))
-        assertThat(spec.blink).containsExactly(
-            BlinkSpec(listOf(WATCH_HAND_VIEW), WatchBatteryLevel.KEY, BATT_LOW),
-            BlinkSpec(listOf(PHONE_HAND_VIEW), PHONE_VALUE_KEY, BATT_LOW)
+        val design = design(defaultDesign())
+        val spec = readAnimation(design)
+        assertThat(blinks(design)).containsExactly(
+            Triple(WATCH_HAND_VIEW, WatchBatteryLevel.KEY, BATT_LOW),
+            Triple(PHONE_HAND_VIEW, PHONE_VALUE_KEY, BATT_LOW)
         )
-        assertThat(spec.rain).isNull()
-        assertThat(spec.glitch).isNull()
-        assertThat(spec.pulse).isNull()
+        assertThat(uses(design, "rain")).isEmpty()
+        assertThat(uses(design, "glitch")).isEmpty()
+        assertThat(uses(design, "pulse")).isEmpty()
         assertThat(spec.normalized().withoutImage()).isEqualTo(spec.withoutImage())
         storeSampleData(newFace())
     }

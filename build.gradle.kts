@@ -83,8 +83,47 @@ tasks.withType<Test>().configureEach {
             isFailOnNoMatchingTests = true
         }
     }
+    // The snapshot harness (src/test/kotlin/app/aaps/watchfaces/snapshot): its folders, given as -PsnapshotZips=... and so on
+    mapOf("snapshotZips" to "snapshot.zips", "snapshotOut" to "snapshot.out", "before" to "snapshot.before", "after" to "snapshot.after", "diffOut" to "snapshot.diffOut")
+        .forEach { (property, name) -> providers.gradleProperty(property).orNull?.let { systemProperty(name, file(it).absolutePath) } }
+    // The snapshots only run when asked for: -Pdesigns=DesignSnapshot, --tests "*DesignSnapshotTest*" or -PsnapshotOut=...
+    val testArgs = gradle.startParameter.taskRequests.flatMap { it.args }
+    val snapshotAsked = testArgs.any { "Snapshot" in it } || providers.gradleProperty("designs").orNull.orEmpty().contains("Snapshot") ||
+        providers.gradleProperty("snapshotOut").isPresent
+    systemProperty("snapshot.run", snapshotAsked.toString())
     testLogging {
         events = setOf(TestLogEvent.FAILED, TestLogEvent.SKIPPED)
         exceptionFormat = TestExceptionFormat.FULL
+    }
+}
+
+// Snapshot renders (-PsnapshotOut=...): each design zip in its own JVM, one Test task per zip, so a
+// design never draws with a font that another design loaded before it in the same JVM (Robolectric's
+// native fonts on macOS). testDebugUnitTest then runs those tasks and renders nothing itself.
+if (providers.gradleProperty("snapshotOut").isPresent) {
+    val zipDir = file(providers.gradleProperty("snapshotZips").orNull ?: "cwf-designs")
+    val zipNames = zipDir.listFiles { f -> f.extension == "zip" }?.map { it.name }?.sorted().orEmpty()
+    afterEvaluate {
+        val base = tasks.named<Test>("testDebugUnitTest")
+        var previous: TaskProvider<Test>? = null
+        val perZip = zipNames.mapIndexed { index, zip ->
+            val before = previous
+            tasks.register<Test>("snapshotDesign$index") {
+                description = "Renders the snapshots of $zip in its own JVM"
+                val b = base.get()
+                classpath = b.classpath
+                testClassesDirs = b.testClassesDirs
+                javaLauncher.set(b.javaLauncher)
+                jvmArgumentProviders.addAll(b.jvmArgumentProviders)
+                b.systemProperties.forEach { (key, value) -> if (key !in systemProperties) systemProperty(key, value as Any) }
+                systemProperty("snapshot.only", zip)
+                filter { includeTestsMatching("*DesignSnapshotTest*") }
+                if (before != null) mustRunAfter(before) else doFirst { File(file(providers.gradleProperty("snapshotOut").get()), "errors.txt").delete() }
+            }.also { previous = it }
+        }
+        base.configure {
+            dependsOn(perZip)
+            systemProperty("snapshot.only", "-")
+        }
     }
 }

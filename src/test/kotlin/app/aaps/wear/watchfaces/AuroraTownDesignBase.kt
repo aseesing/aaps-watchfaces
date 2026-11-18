@@ -32,9 +32,8 @@ import app.aaps.wear.watchfaces.animation.WakeAnimationJson
 import app.aaps.wear.watchfaces.animation.WakeAnimationSpec
 import app.aaps.wear.watchfaces.animation.WakeAnimator
 import app.aaps.wear.watchfaces.animation.WakeTimer
-import app.aaps.wear.watchfaces.animation.allLayers
 import app.aaps.wear.watchfaces.daynight.DayNightClock
-import app.aaps.wear.watchfaces.daynight.DayOverlay
+import app.aaps.wear.watchfaces.design.LegacyDesign
 import app.aaps.wear.watchfaces.daynight.GeoPoint
 import app.aaps.wear.watchfaces.daynight.MoonLight
 import app.aaps.wear.watchfaces.daynight.MoonPhase
@@ -381,7 +380,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
     private fun moonLayer(): JSONObject {
         val half = AuroraTownImages.MOON_SIZE / 2f
         val box = rect((AuroraTownImages.MOON_X - half).roundToInt().toFloat(), (AuroraTownImages.MOON_Y - half).roundToInt().toFloat(), AuroraTownImages.MOON_SIZE, AuroraTownImages.MOON_SIZE)
-        return JSONObject().put(WakeAnimationJson.MOON, true).put("rect", box).put("slot", "back").put("rest", 0)
+        return JSONObject().put(LegacyDesign.MOON_KEY, true).put("rect", box).put("slot", "back").put("rest", 0)
     }
 
     /** The light of the star ([AuroraTownImages.starGlow]), screened over the gold star of the photo. */
@@ -577,7 +576,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         var clock = 0L
         val animator = WakeAnimator(
             heartRate = { 72 }, value = { key -> moonValue(key, instant, place) },
-            moon = { ms, size -> DesignAccess.wakeMoon(face, ms, size) }, timer = WakeTimer { clock }
+            images = { _, ms, size -> DesignAccess.wakeMoon(face, ms, size) }, timer = WakeTimer { clock }
         )
         animator.setDesign(readAnimation(design))
         return atMs.associateWith { ms ->
@@ -672,7 +671,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         File(out, "$fileName.png").writeBytes(pngBytes(previewImage))
         println("$fileName.zip: ${zip.size} bytes (preview ${jpg.size}, json ${json.length})")
         assertThat(zip.size).isAtMost(MAX_ZIP_BYTES)
-        for (name in images.keys) assertWithMessage(name).that(name.endsWith(DayOverlay.IMAGE_SUFFIX)).isFalse()
+        for (name in images.keys) assertWithMessage(name).that(name.endsWith(LegacyDesign.DAY_SUFFIX)).isFalse()
 
         val loaded = ZipWatchfaceFormat.loadCustomWatchface(zip, "$fileName.zip", authorization = true)
         assertThat(loaded).isNotNull()
@@ -700,9 +699,9 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         val design = design(default)
         val text = design.toString()
         assertThat(design.has(WakeAnimationSpec.JSON_KEY)).isFalse()
-        assertThat(text).doesNotContain(MoonPicture.JSON_KEY)
-        assertThat(design.has(DayOverlay.WEATHER_KEY)).isFalse()
-        assertThat(design.has(DayOverlay.JSON_KEY)).isFalse()
+        assertThat(text).doesNotContain(LegacyDesign.MOON_LIGHT_KEY)
+        assertThat(design.has(LegacyDesign.WEATHER_LOOKS_KEY)).isFalse()
+        assertThat(design.has(LegacyDesign.DAY_LOOK_KEY)).isFalse()
         val views = ViewKeys.entries.map { it.key }.toSet()
         val keys = JsonKeys.entries.map { it.key }.toSet()
         for (key in design.keys()) {
@@ -885,7 +884,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         assumeTrue(animated)
         val design = design(default)
         val spec = readAnimation(design).normalized()
-        val animator = LayerAnimator(spec.allLayers())
+        val animator = LayerAnimator(spec.layers, spec.lets)
         assertWithMessage("${animator.errors}").that(animator.errors).isEmpty()
         assertThat(animator.size).isEqualTo(design.getJSONObject(WakeAnimationSpec.JSON_KEY).getJSONArray("layers").length())
         assertThat(animator.hasRest).isTrue()

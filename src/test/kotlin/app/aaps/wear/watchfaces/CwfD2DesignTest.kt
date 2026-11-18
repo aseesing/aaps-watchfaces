@@ -38,7 +38,7 @@ import app.aaps.wear.watchfaces.animation.WakeAnimator
 import app.aaps.wear.watchfaces.animation.WakeTimer
 import app.aaps.wear.watchfaces.colour.ColourLooks
 import app.aaps.wear.watchfaces.daynight.DayNightClock
-import app.aaps.wear.watchfaces.daynight.DayOverlay
+import app.aaps.wear.watchfaces.design.LegacyDesign
 import app.aaps.wear.watchfaces.daynight.MoonPicture
 import app.aaps.wear.watchfaces.daynight.StoredWeather
 import app.aaps.wear.watchfaces.utils.DesignTimeText
@@ -245,7 +245,7 @@ class CwfD2DesignTest : CwfDesignBase() {
         text("day_name", DAY_NAME_BOX, DAY_NAME_SIZE, "center", WHITE).put("allCaps", true)
         text("day", DAY_BOX, DAY_SIZE, "center", COLOUR_2)
         // The moon is drawn by the watch, from a photo it carries: lit and turned as it is in the sky now
-        place(MOON_VIEW, MOON_BOX.left.toInt(), MOON_BOX.top.toInt(), MOON_BOX.width().toInt(), MOON_BOX.height().toInt()).put("textvalue", "").put(MoonPicture.JSON_KEY, true)
+        place(MOON_VIEW, MOON_BOX.left.toInt(), MOON_BOX.top.toInt(), MOON_BOX.width().toInt(), MOON_BOX.height().toInt()).put("textvalue", "").put(LegacyDesign.MOON_LIGHT_KEY, true)
         // The colon between them is a picture (see colonPicture), in the same colour
         text("hour", HOUR_BOX, TIME_SIZE, "right", COLOUR_1)
         text("minute", MINUTE_BOX, TIME_SIZE, "left", COLOUR_1)
@@ -298,7 +298,7 @@ class CwfD2DesignTest : CwfDesignBase() {
             .put(TEMPERATURE_DYN, JSONObject().put("valueKey", StoredWeather.JSON_VALUE_KEY).put("textvalue1", "%.0f°").put("invalidTextvalue", ""))
 
         // The weather: the icon of each kind, by day and by night. Without a weather (none, or too old) no icon.
-        put(DayOverlay.WEATHER_KEY, JSONObject().apply {
+        put(LegacyDesign.WEATHER_LOOKS_KEY, JSONObject().apply {
             for ((weather, icons) in WEATHER_ICONS)
                 put(weather, JSONObject().put("dynData", JSONObject().put(WEATHER_ICON_DYN, weatherIconDynData(icons.first, icons.second))))
         })
@@ -1624,7 +1624,7 @@ class CwfD2DesignTest : CwfDesignBase() {
     @Test
     fun theMoonIsDrawnByTheWatchAsItIsNow() {
         val view = design(defaultDesign()).getJSONObject(MOON_VIEW)
-        assertThat(view.optBoolean(MoonPicture.JSON_KEY)).isTrue()
+        assertThat(view.optBoolean(LegacyDesign.MOON_LIGHT_KEY)).isTrue()
         assertThat(view.has("dynData")).isFalse()
         assertWithMessage("moon and the widest day").that(MOON_BOX.right).isAtMost(DAY_BOX.centerX() - (1..31).maxOf { textWidth("$it", DAY_SIZE) } / 2 - 4f)
         assertWithMessage("moon and the panel edge").that(MOON_BOX.left).isAtLeast(TIME_PANEL.left + 3f)
@@ -1811,16 +1811,19 @@ class CwfD2DesignTest : CwfDesignBase() {
 
     @Test
     fun theWakeAnimationIsReadAsDesigned() {
-        val spec = readAnimation(design(defaultDesign()))
+        val design = design(defaultDesign())
+        val spec = readAnimation(design)
         // Every value is inside the safe limits, so nothing is changed on the watch
         assertThat(spec.normalized()).isEqualTo(spec)
+        assertThat(spec.errors).isEmpty()
         assertThat(spec.durationMs).isEqualTo(ANIMATION_MS)
-        assertThat(spec.sweep.map { it.views.single() }).containsExactly(BG_NEEDLE_VIEW, SENSOR_NEEDLE_VIEW, PUMP_NEEDLE_VIEW).inOrder()
-        assertThat(spec.wobble.single().views).containsExactly(TREND_HAND_VIEW)
-        assertThat(spec.trace?.view).isEqualTo("chart")
-        assertThat(spec.glint?.rings).hasSize(1)
+        val sweeps = uses(design, "sweep")
+        assertThat(sweeps.map { it.getString("view") }).containsExactly(BG_NEEDLE_VIEW, SENSOR_NEEDLE_VIEW, PUMP_NEEDLE_VIEW).inOrder()
+        assertThat(uses(design, "wobble").map { it.getString("view") }).containsExactly(TREND_HAND_VIEW)
+        assertThat(uses(design, "trace").single().getString("view")).isEqualTo("chart")
+        assertThat(uses(design, "glint").single().getJSONArray("rings").length()).isEqualTo(1)
         // Everything has settled before the end, and the light comes after the hands
-        val last = spec.sweep.maxOf { it.delayMs + it.upMs + it.settleMs }
+        val last = sweeps.maxOf { it.optLong("delayMs", 0) + it.optLong("upMs", 600) + it.optLong("settleMs", 900) }
         assertThat(last).isAtMost(GLINT_DELAY_MS + 100)
         assertThat(GLINT_DELAY_MS + GLINT_MS).isAtMost(ANIMATION_MS)
         assertThat(TRACE_DELAY_MS + TRACE_MS).isAtMost(ANIMATION_MS)

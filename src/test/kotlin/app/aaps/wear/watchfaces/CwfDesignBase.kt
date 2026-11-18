@@ -33,7 +33,7 @@ import app.aaps.wear.health.healthComplicationData
 import app.aaps.wear.phonepreview.DesignAccess
 import app.aaps.wear.phonepreview.PreviewHost
 import app.aaps.wear.watchfaces.animation.WakeAnimationSpec
-import app.aaps.wear.watchfaces.daynight.DayOverlay
+import app.aaps.wear.watchfaces.design.LegacyDesign
 import com.google.common.truth.Truth.assertWithMessage
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -108,12 +108,32 @@ abstract class CwfDesignBase {
 
     protected fun newFace() = CustomWatchface().apply { prepareForRendering(host) }
 
-    /** Stores sample data in [face]. [adjustStatus] can change the status before it is stored, for values a design needs in addition. */
+    /**
+     * The instant the last [storedFace] draws for, or null before the first. The face shows the ages of
+     * the values against the instant it draws for, so the sample data is stamped against it too.
+     */
+    private var sampleInstant: Long? = null
+
+    /** Stores the last sample data again, stamped against another instant; see [storedFace]. */
+    private var storeLastSample: ((CustomWatchface, Long) -> Unit)? = null
+
+    /**
+     * Stores sample data in [face], the values [bgAgeMin] and [loopAgeMin] minutes old at [now]: the
+     * instant of the last [storedFace], else the real clock. [adjustStatus] can change the status before
+     * it is stored, for values a design needs in addition. [storedFace] stores it again for its instant.
+     */
     protected fun storeSampleData(
         face: CustomWatchface, sample: Sample = Sample(), bgAgeMin: Long = 2, loopAgeMin: Long = 3, phoneBattery: String = PHONE_SAMPLE,
         adjustStatus: (EventData.Status) -> EventData.Status = { it }, graph: ((now: Long) -> List<EventData.SingleBg>)? = null
+    ) {
+        storeLastSample = { target, now -> storeSample(target, sample, bgAgeMin, loopAgeMin, phoneBattery, adjustStatus, graph, now) }
+        storeSample(face, sample, bgAgeMin, loopAgeMin, phoneBattery, adjustStatus, graph, sampleInstant ?: System.currentTimeMillis())
+    }
+
+    private fun storeSample(
+        face: CustomWatchface, sample: Sample, bgAgeMin: Long, loopAgeMin: Long, phoneBattery: String,
+        adjustStatus: (EventData.Status) -> EventData.Status, graph: ((now: Long) -> List<EventData.SingleBg>)?, now: Long
     ) = runBlocking {
-        val now = System.currentTimeMillis()
         val repository = face.complicationDataRepository
         repository.updateBgData(
             EventData.SingleBg(
@@ -184,12 +204,53 @@ abstract class CwfDesignBase {
 
     private fun formatOf(bytes: ByteArray) = if (isJpeg(bytes)) ResFormat.JPG else ResFormat.PNG
 
-    /** [design] in [weather], as the watch lays the weather look over it. These designs have no day look, so the watch asks for the night. */
-    protected fun lookOf(design: JSONObject, weather: String?): JSONObject = DayOverlay.apply(design, false, weather)
+    /**
+     * [design] in [weather], with the weather look laid over it, still in the old form these generators
+     * write (the watch reads it through `LegacyDesign`, the same as the watch did before). These designs
+     * have no day look, so the watch asks for the night.
+     */
+    protected fun lookOf(design: JSONObject, weather: String?): JSONObject {
+        val result = JSONObject(design.toString())
+        result.remove(LegacyDesign.DAY_LOOK_KEY)
+        result.remove(LegacyDesign.WEATHER_LOOKS_KEY)
+        result.remove(LegacyDesign.IMAGES_KEY)
+        weather?.let { w -> design.optJSONObject(LegacyDesign.WEATHER_LOOKS_KEY)?.let { looks -> looks.optJSONObject("night_$w") ?: looks.optJSONObject(w) } }?.let { merge(result, it) }
+        return result
+    }
 
     /** The pictures the watch uses for [look] (made by [lookOf]): [images] with the swaps the look names. */
-    protected fun lookImages(look: JSONObject, images: Map<String, ByteArray>): Map<String, ByteArray> =
-        DayOverlay.resources(images.mapValues { ResData(it.value, formatOf(it.value)) }.toMutableMap(), look, false).mapValues { it.value.value }
+    protected fun lookImages(look: JSONObject, images: Map<String, ByteArray>): Map<String, ByteArray> {
+        val result = images.toMutableMap()
+        look.optJSONObject(LegacyDesign.IMAGES_KEY)?.let { swaps -> swaps.keys().forEach { target -> images[swaps.optString(target)]?.let { result[target] = it } } }
+        return result
+    }
+
+    /** Lays [overlay] over [target] as the looks do: objects merged key by key, `null` removes, the rest replaces. */
+    private fun merge(target: JSONObject, overlay: JSONObject) {
+        overlay.keys().forEach { key ->
+            val value = overlay.opt(key)
+            val current = target.optJSONObject(key)
+            when {
+                value == null || value == JSONObject.NULL -> target.remove(key)
+                value is JSONObject && current != null    -> merge(current, value)
+                value is JSONObject                       -> target.put(key, JSONObject(value.toString()))
+                else                                      -> target.put(key, value)
+            }
+        }
+    }
+
+    /**
+     * The `use` entries of [template] in the animation of [design] as the watch reads it: the old keys
+     * rewritten into the new form (see `LegacyDesign`), in their order.
+     */
+    protected fun uses(design: JSONObject, template: String): List<JSONObject> {
+        val layers = DesignAccess.translate(design).optJSONObject(WakeAnimationSpec.JSON_KEY)?.optJSONArray("layers") ?: return emptyList()
+        return (0 until layers.length()).mapNotNull { layers.optJSONObject(it) }.filter { it.optString("use") == template }
+    }
+
+    /** The view, value key and level of each `blink` of [design], as the watch reads it. */
+    protected fun blinks(design: JSONObject): List<Triple<String, String, Double>> =
+        uses(design, "blink").map { Triple(it.getString("view"), it.getString("valueKey"), it.getDouble("atOrBelow")) }
 
     /**
      * A render-only face that shows [design], with 24 hour time as on the watch, as it looks at
@@ -201,6 +262,9 @@ abstract class CwfDesignBase {
         setWatchBattery(watchBattery)
         val face = newFace()
         face.setRenderInstant(instant)
+        // The values as old against the instant as they were stored, as the face shows ages against it
+        sampleInstant = instant
+        storeLastSample?.invoke(face, instant)
         face.sp.putBoolean(R.string.key_show_date, true)
         // What the watch sets from the metadata of the design (see layout)
         for (key in listOf(R.string.key_show_delta, R.string.key_show_avg_delta, R.string.key_show_uploader_battery, R.string.key_show_rig_battery))
