@@ -84,6 +84,10 @@ import kotlin.math.sqrt
  *   has the white cap (the value worked out from mg/dL, with the decimal sign of the watch), and `sgv`
  *   above it has the digits with the snow cut out ([SnowCapFont.cutFont]), in the level colour.
  *
+ * The animated design does not use these views: it writes the same texts as text layers of the watch
+ * engine (see `textLayers`), which are drawn at their exact place. There the glucose is in the unit the
+ * wearer uses, and the time has 12 or 24 hours as the watch is set.
+ *
  * A soft dark shade lies behind the texts (the picture of `cover_chart`, the only picture view drawn
  * below the free texts), so they can be read on the bright aurora.
  *
@@ -275,8 +279,9 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         put("highColor", HIGH_COLOR).put("midColor", MID_COLOR).put("lowColor", LOW_COLOR)
 
         // Every view this design does not use is off
-        val used = mutableSetOf("background", "time", "hour", "minute", "sgv", CAP_VIEW, "direction", "hour_hand", "minute_hand", SHADE_VIEW)
-        if (!animated) used += "second_hand"
+        val used = mutableSetOf("background", "direction", "hour_hand", "minute_hand", SHADE_VIEW)
+        // The animated design writes the time and the glucose as text layers (see textLayers), not as views
+        if (!animated) used += listOf("time", "hour", "minute", "sgv", CAP_VIEW, "second_hand")
         if (animated) used += SLOTS.map { it.first }
         keys().asSequence().toList().forEach { key ->
             val view = optJSONObject(key) ?: return@forEach
@@ -288,7 +293,8 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         // graph is the only picture view drawn below the free texts (the snow of the glucose value).
         place(SHADE_VIEW, SHADE_BOX)
 
-        // The time: the red digits, then the snow on the hours and on the minutes
+        // The time: the red digits, then the snow on the hours and on the minutes. In the animated design
+        // these views are off (set above): their places stay in the json, the text layers draw there.
         val time = timeBox()
         val digit = advance('0', TIME_SIZE)
         text("time", Rect(time.left, time.top, time.right + TIME_SLACK, time.bottom), TIME_SIZE, "left", CUT_FONT, TIME_COLOR)
@@ -303,6 +309,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         val sgv = sgvBox()
         text(CAP_VIEW, sgv, SGV_SIZE, "right", CAP_FONT, SNOW_COLOR).put("dynValue", true).put("textvalue", capFormat).put("dynData", MMOL_DYN)
         text("sgv", sgv, SGV_SIZE, "right", CUT_FONT, MID_COLOR)
+        if (animated) for (key in TEXT_VIEWS) getJSONObject(key).put("visibility", "gone")
         place("direction", arrowBox())
 
         // The church clock
@@ -403,6 +410,8 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         // The star on the tree, over its lights: lit and steady at rest; while it plays the rays turn
         // slowly and the light sparkles. All motion is scaled by env, so the start and the end are the rest.
         layers.put(starLayer())
+        // The time and the glucose, over the shade and below the falling snow
+        textLayers().forEach { layers.put(it) }
         // Snow, only while it plays: soft flakes and small crystals blown from left to right, and one big crystal
         layers.put(
             JSONObject().put("shape", "dot").put("colors", JSONArray().put(SNOW_COLOR)).put("slot", "front")
@@ -425,7 +434,53 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
                 .put("y", "mod(20 + t*19, 440) - 20")
                 .put("rotation", "t*14").put("alpha", "env*0.95")
         )
-        return JSONObject().put("durationMs", ANIMATION_MS).put("fps", 24).put("fadeMs", FADE_MS).put("let", animationLets()).put("layers", layers)
+        return JSONObject().put("durationMs", ANIMATION_MS).put("fps", 24).put("fadeMs", FADE_MS).put("let", animationLets())
+            .put("functions", JSONObject().put("$BG_FUNCTION()", "glucose(v_sgv)"))
+            .put("layers", layers)
+    }
+
+    /** Where the letters of the time and of the glucose stand (their baseline), in design pixels. */
+    protected fun timeBaseline(): Int = timeBox().top + lineAbove(TIME_SIZE)
+    protected fun sgvBaseline(): Int = sgvBox().top + lineAbove(SGV_SIZE)
+
+    /**
+     * The time and the glucose of the animated design, as text layers of the watch engine. Each number
+     * is two layers with the same text at the same place: the coloured digits with the snow cut out
+     * ([SnowCapFont.cutFont]) and the white snow ([SnowCapFont.capFont]). A layer is drawn at the exact
+     * place, not on whole pixels as a view is, and both layers get the same place, so the snow lies on
+     * its digits at every screen size. They stay on the face (`rest`), in the slot `front`: over the
+     * shade, and below the snow that falls.
+     *
+     * - The time is `clock()`: 12 or 24 hours as the watch is set.
+     * - The glucose is `glucose(v_sgv)` (the own function `bg()`): in the unit the wearer uses, with the
+     *   decimal sign of the watch language, in the colour of its level. Without a value it shows `---`.
+     * - A glucose value older than [STALE_MINUTES] minutes has a line through it, as the glucose view of
+     *   a face has. The line is as wide as the text: so many digits, and the decimal sign when there is one.
+     */
+    private fun textLayers(): List<JSONObject> {
+        fun text(formula: String, font: String, size: Int, align: String, x: Int, y: Int) = JSONObject()
+            .put("text", formula).put("font", font).put("fontSize", size).put("align", align).put("x", x).put("y", y).put("slot", "front").put("rest", 0)
+        val time = timeBox()
+        val bg = "$BG_FUNCTION()"
+        val levels = JSONArray().put(LOW_COLOR).put(MID_COLOR).put(HIGH_COLOR)
+        val level = "if(missing(v_sgvLevel), 1, v_sgvLevel + 1)"
+        // How wide the glucose is: its digits, and its decimal sign when it has one
+        val digit = SnowCapFont.advance('0') * SGV_SIZE.toFloat() / SnowCapFont.unitsPerEm
+        val sign = SnowCapFont.advance(',') * SGV_SIZE.toFloat() / SnowCapFont.unitsPerEm
+        val width = "(len($bg) - dec) * ${round2(digit.toDouble())} + dec * ${round2(sign.toDouble())}"
+        return listOf(
+            // The time: the red digits, then the snow on them
+            text("clock()", CUT_FONT, TIME_SIZE, "left", time.left, timeBaseline()).put("color", TIME_COLOR),
+            text("clock()", CAP_FONT, TIME_SIZE, "left", time.left, timeBaseline()).put("color", SNOW_COLOR),
+            // The glucose: the cut digits in the level colour, then the snow on them
+            text("if(missing(v_sgv), '---', $bg)", CUT_FONT, SGV_SIZE, "right", SGV_RIGHT, sgvBaseline()).put("colors", levels).put("colorIndex", level),
+            text(bg, CAP_FONT, SGV_SIZE, "right", SGV_RIGHT, sgvBaseline()).put("color", SNOW_COLOR),
+            // An old value is struck through
+            JSONObject().put("shape", "rect").put("colors", levels).put("colorIndex", level).put("slot", "front").put("rest", 0)
+                .put("let", JSONObject().put("dec", "find(',', $bg) + find('.', $bg) > 0").put("w", width))
+                .put("x", "$SGV_RIGHT - w").put("y", round2(sgvBaseline() - STRIKE_ABOVE * SGV_SIZE.toDouble())).put("width", "w").put("height", STRIKE_HEIGHT)
+                .put("visible", "v_timestamp >= $STALE_MINUTES && !missing(v_sgv)")
+        )
     }
 
     /**
@@ -690,7 +745,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
 
     /** A glucose sample of [mgdl], its text as the phone sends it, in the decimal sign of the test locale. */
     protected fun sample(mgdl: Double = 120.0, level: Long = 0, arrow: String = "→"): Sample =
-        Sample(text = if (this.mgdl) String.format(locale, MGDL_FORMAT, mgdl) else String.format(locale, MMOL_FORMAT, mgdl / MGDL_PER_MMOL), arrow = arrow, mgdl = mgdl, level = level)
+        Sample(text = if (this.mgdl) String.format(locale, MGDL_FORMAT, mgdl) else String.format(locale, MMOL_FORMAT, mgdl / (if (animated) WATCH_MGDL_PER_MMOL else MGDL_PER_MMOL)), arrow = arrow, mgdl = mgdl, level = level)
 
     protected fun at(hour: Int, minute: Int, second: Int = 0): Long =
         LocalDateTime.of(2026, 12, 24, hour, minute, second).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
@@ -704,6 +759,8 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         val face = storedFace(design, default, images() + extraImages, instant)
         // The choices of the options, as the wearer stores them on the watch
         DesignOptions.read(design).forEachIndexed { i, option -> testOptions[option?.name]?.let { face.sp.putString(OPTION_PREFS[i], it.toString()) } }
+        // The unit the wearer uses, as the phone sends it: the text layers write the glucose in it
+        face.sp.putBoolean(R.string.key_units_mgdl, mgdl)
         // The place the phone sent last, which turns the moon as it stands in the sky there
         place?.let { storePlace(face, it.latitude, it.longitude) }
         // A face for a picture fills the hour and minute views with the time of now, not with the time
@@ -756,8 +813,9 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         val (face, _) = face(instant, place = place)
         var clock = 0L
         val animator = WakeAnimator(
-            heartRate = { 72 }, value = { key -> wakeValue(key, instant, place, design) },
-            images = { _, ms, size -> DesignAccess.wakeMoon(face, ms, size) }, timer = WakeTimer { clock }
+            // The glucose and its age come from the face, as on the watch
+            heartRate = { 72 }, value = { key -> wakeValue(key, instant, place, design) ?: DesignAccess.value(face, key) },
+            images = { _, ms, size -> DesignAccess.wakeMoon(face, ms, size) }, texts = DesignAccess.faceTexts(face), timer = WakeTimer { clock }
         )
         animator.setDesign(readAnimation(design))
         return atMs.associateWith { ms ->
@@ -872,6 +930,31 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         }
     }
 
+    /**
+     * As [snowOnDigits] of a view, for a text layer: [text] at [textSize] with its letters standing on
+     * [baseline], starting at [x], or ending there with [fromRight]; all in screen pixels.
+     */
+    private fun snowOnDigits(picture: Bitmap, text: String, x: Float, baseline: Float, textSize: Float, color: String, fromRight: Boolean): List<SnowOnDigit> {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG or Paint.LINEAR_TEXT_FLAG).apply { this.textSize = textSize; typeface = cutFace }
+        val start = if (fromRight) x - paint.measureText(text) else x
+        val top = (baseline - CELL_ABOVE * textSize).roundToInt()
+        return text.indices.filter { text[it].isDigit() }.map { i ->
+            val left = start + paint.measureText(text, 0, i)
+            val cell = Rect(left.roundToInt(), top, (left + paint.measureText(text, i, i + 1)).roundToInt(), baseline.roundToInt() + 3)
+            val digit = middleX(picture, cell) { near(it, color) }
+            val snow = middleX(picture, cell) { isSnow(it) }
+            val digitRows = inkRows(picture, cell) { near(it, color) }
+            val snowRows = inkRows(picture, cell) { isSnow(it) }
+            assertWithMessage("digit ${text[i]} of $text").that(digit != null && digitRows != null).isTrue()
+            assertWithMessage("snow on ${text[i]} of $text").that(snow != null && snowRows != null).isTrue()
+            SnowOnDigit(text[i], snow!! - digit!!, snowRows!!.first - digitRows!!.last)
+        }
+    }
+
+    /** The text layers of the animation of [design], in their order. */
+    private fun textLayersOf(design: JSONObject): List<JSONObject> =
+        design.getJSONObject(WakeAnimationSpec.JSON_KEY).getJSONArray(WakeAnimationJson.LAYERS).let { layers -> (0 until layers.length()).map { layers.getJSONObject(it) }.filter { it.has("text") } }
+
     // ------------------------------------------------------------------------------------------
     // The tests
     // ------------------------------------------------------------------------------------------
@@ -901,9 +984,17 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         assertThat(metadata[CwfMetadataKey.CWF_PREF_WATCH_SHOW_SECONDS]).isEqualTo((!animated).toString())
         // The two fonts are in the zip, and the texts use them
         for (font in listOf(CAP_FONT, CUT_FONT)) assertWithMessage(font).that(loaded.cwfData.resData[font]?.format).isEqualTo(ResFormat.TTF)
-        assertThat(design.getJSONObject("time").getString("font")).isEqualTo(CUT_FONT)
-        for (key in listOf("hour", "minute", CAP_VIEW)) assertWithMessage(key).that(design.getJSONObject(key).getString("font")).isEqualTo(CAP_FONT)
-        assertThat(design.getJSONObject("sgv").getString("font")).isEqualTo(CUT_FONT)
+        if (animated) {
+            // Two text layers per number, one in each font, at the same place; the views of the texts are off
+            val texts = textLayersOf(watchDesign)
+            assertThat(texts.map { it.getString("font") }).containsExactly(CUT_FONT, CAP_FONT, CUT_FONT, CAP_FONT).inOrder()
+            for (pair in texts.chunked(2)) for (key in listOf("x", "y", "align", "fontSize")) assertWithMessage(key).that(pair[0].get(key).toString()).isEqualTo(pair[1].get(key).toString())
+            for (key in TEXT_VIEWS) assertWithMessage(key).that(watchDesign.getJSONObject(key).getString("visibility")).isEqualTo("gone")
+        } else {
+            assertThat(design.getJSONObject("time").getString("font")).isEqualTo(CUT_FONT)
+            for (key in listOf("hour", "minute", CAP_VIEW)) assertWithMessage(key).that(design.getJSONObject(key).getString("font")).isEqualTo(CAP_FONT)
+            assertThat(design.getJSONObject("sgv").getString("font")).isEqualTo(CUT_FONT)
+        }
         // Every picture is in the zip
         assertThat(loaded.cwfData.resData.keys).containsAtLeastElementsIn(images.keys)
 
@@ -948,7 +1039,8 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
             val (face, picture) = face(at(h, m, s), change = ::withoutSnow)
             val expected = String.format(Locale.ROOT, "%02d:%02d", h, m)
             pictures += expected to picture
-            // The views show what the layout counts on
+            // The views show what the layout counts on (the animated design has text layers, checked by their pixels below)
+            if (!animated) {
             val timeView = face.textOf(R.id.time)
             assertWithMessage("time text").that(timeView.text.toString()).startsWith(expected)
             assertThat(face.textOf(R.id.hour).text.toString()).isEqualTo(expected.substring(0, 2))
@@ -964,6 +1056,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
             val ink = Rect().also { layout.paint.getTextBounds(expected, 0, expected.length, it) }
             assertWithMessage("first line ink").that(timeView.baseline + ink.bottom).isAtMost(timeView.height)
             assertWithMessage("baseline").that(timeView.baseline).isEqualTo(lineAbove(TIME_SIZE))
+            }
             assertCapsOnDigits(expected, picture, expected, time.left, time.top, time.bottom, TIME_SIZE, TIME_COLOR, SIDEWAYS_TOLERANCE)
             // Nothing of the seconds shows below the time
             val below = Rect(time.left - 10, time.bottom, time.right + 40, time.bottom + time.height())
@@ -989,6 +1082,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
      */
     @Test
     fun theTextsFitAtEveryScreenSize() {
+        assumeTrue(!animated) // a text layer is one line and never breaks
         for (size in SCREEN_SIZES) for ((h, m, s) in listOf(Triple(10, 12, 37), Triple(18, 48, 8), Triple(0, 0, 0))) {
             val (face, _) = face(at(h, m, s), size = size, change = ::withoutSnow)
             val expected = String.format(Locale.ROOT, "%02d:%02d", h, m)
@@ -1017,8 +1111,10 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         for (size in SCREEN_SIZES) {
             val scale = size / 400f
             val (face, picture) = face(at(20, 39, 25), sample, size = size, change = ::withoutSnow)
-            val time = snowOnDigits(face, picture, face.textOf(R.id.time), TIME_COLOR)
-            val glucose = snowOnDigits(face, picture, face.textOf(R.id.sgv), HIGH_COLOR)
+            val time = if (animated) snowOnDigits(picture, "20:39", timeBox().left * scale, timeBaseline() * scale, TIME_SIZE * scale, TIME_COLOR, fromRight = false)
+            else snowOnDigits(face, picture, face.textOf(R.id.time), TIME_COLOR)
+            val glucose = if (animated) snowOnDigits(picture, sample.text, SGV_RIGHT * scale, sgvBaseline() * scale, SGV_SIZE * scale, HIGH_COLOR, fromRight = true)
+            else snowOnDigits(face, picture, face.textOf(R.id.sgv), HIGH_COLOR)
             assertWithMessage("$size px: time").that(time.map { it.char }.joinToString("")).isEqualTo("2039")
             assertWithMessage("$size px: glucose").that(glucose.map { it.char }.joinToString("")).isEqualTo(sample.text.filter { it.isDigit() })
             for ((name, digits, textSize, color) in listOf(
@@ -1026,7 +1122,8 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
                 SnowCheck("glucose", glucose, SGV_SIZE * scale, HIGH_COLOR)
             )) for (d in digits) {
                 val alone = snowOnDigitAlone(d.char, textSize, color)
-                assertWithMessage("$size px: $name, snow on ${d.char} sideways").that(d.dx).isWithin(SIDEWAYS_TOLERANCE).of(alone.dx)
+                // Text layers share one exact place, so their snow lies as when the pair is drawn alone; two views can be a pixel more apart
+                assertWithMessage("$size px: $name, snow on ${d.char} sideways").that(d.dx).isWithin(if (animated) LAYER_TOLERANCE else SIDEWAYS_TOLERANCE).of(alone.dx)
                 assertWithMessage("$size px: $name, height of the snow on ${d.char}").that(d.dy.toFloat()).isWithin(SNOW_HEIGHT_TOLERANCE).of(alone.dy.toFloat())
             }
         }
@@ -1040,7 +1137,9 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         val bitmap = createBitmap(3 * size, 3 * size).apply { eraseColor(Color.BLACK) }
         val canvas = Canvas(bitmap)
         for ((typeface, ink) in listOf(cutFace to color, capFace to SNOW_COLOR)) {
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.textSize = textSize; this.typeface = typeface; this.color = Color.parseColor(ink) }
+            // A text layer draws its signs as the watch engine does: at the exact place, with their true shapes
+            val flags = if (animated) Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG or Paint.LINEAR_TEXT_FLAG else Paint.ANTI_ALIAS_FLAG
+            val paint = Paint(flags).apply { this.textSize = textSize; this.typeface = typeface; this.color = Color.parseColor(ink) }
             canvas.drawText(char.toString(), size.toFloat(), 2f * size, paint)
         }
         val all = Rect(0, 0, bitmap.width, bitmap.height)
@@ -1056,12 +1155,13 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
             val sample = sample(mgdl, level)
             val (face, picture) = face(PREVIEW_MS, sample, change = ::withoutSnow)
             pictures += sample.text to picture
-            val cap = face.textOf(R.id.freetext1).text.toString()
-            val value = face.textOf(R.id.sgv).text.toString()
+            // The animated design writes the value with text layers: the pixels below show it is the same text
+            val cap = if (animated) sample.text else face.textOf(R.id.freetext1).text.toString()
+            val value = if (animated) sample.text else face.textOf(R.id.sgv).text.toString()
             assertWithMessage("cap of $mgdl").that(cap).isEqualTo(sample.text)
             assertWithMessage("value of $mgdl").that(value).isEqualTo(sample.text)
             // Both views have the whole line, so nothing of the value or its snow is cut
-            for (id in listOf(R.id.sgv, R.id.freetext1)) {
+            if (!animated) for (id in listOf(R.id.sgv, R.id.freetext1)) {
                 val view = face.textOf(id)
                 assertWithMessage("line of $value").that(view.layout.getLineBottom(0)).isEqualTo(view.height)
                 assertWithMessage("baseline of $value").that(view.baseline).isEqualTo(lineAbove(SGV_SIZE))
@@ -1075,8 +1175,9 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         // The decimal sign is the one of the watch: "6,7" in Dutch
         assertThat(String.format(Locale.forLanguageTag("nl-NL"), MMOL_FORMAT, 120.0 * 100 / 1800)).isEqualTo("6,7")
         // Without a value the cap is empty
-        val (face, _) = face(PREVIEW_MS, Sample(text = "---", arrow = "--", mgdl = 0.0, level = 0))
-        assertThat(face.textOf(R.id.freetext1).text.toString()).isEmpty()
+        val (face, none) = face(PREVIEW_MS, Sample(text = "---", arrow = "--", mgdl = 0.0, level = 0))
+        if (animated) assertWithMessage("snow without a value").that(count(none, sgv) { isSnow(it) }).isEqualTo(0)
+        else assertThat(face.textOf(R.id.freetext1).text.toString()).isEmpty()
         storeSampleData(newFace())
     }
 
@@ -1088,7 +1189,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         val sample = sample(120.0)
         assertThat(sample.text).isEqualTo("6,7")
         val (face, picture) = face(PREVIEW_MS, sample, change = ::withoutSnow)
-        assertThat(face.textOf(R.id.freetext1).text.toString()).isEqualTo("6,7")
+        if (!animated) assertThat(face.textOf(R.id.freetext1).text.toString()).isEqualTo("6,7")
         val sgv = sgvBox()
         val left = sgv.right - Paint().apply { textSize = SGV_SIZE.toFloat(); typeface = baseFace }.measureText("6,7").roundToInt()
         assertCapsOnDigits("6,7", picture, "6,7", left, sgv.top, sgv.bottom, SGV_SIZE, MID_COLOR)
@@ -1134,6 +1235,11 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         // The colours against the sky behind the texts, as the watch shows it (with the shade)
         val (_, picture) = face(PREVIEW_MS) { design ->
             for (key in listOf("time", "hour", "minute", "sgv", CAP_VIEW, "direction")) design.getJSONObject(key).put("visibility", "gone")
+            // And without the text layers of the animated design
+            design.optJSONObject(WakeAnimationSpec.JSON_KEY)?.let { animation ->
+                val layers = animation.getJSONArray(WakeAnimationJson.LAYERS)
+                animation.put(WakeAnimationJson.LAYERS, JSONArray().apply { for (i in 0 until layers.length()) layers.getJSONObject(i).takeIf { !it.has("text") }?.let(::put) })
+            }
         }
         val sky = listOf(timeBox(), sgvBox()).flatMap { r -> around(picture, Pair(r.exactCenterX(), r.exactCenterY()), r.height() / 2) }
         val sorted = sky.map { luminance(it) }.sorted()
@@ -1152,7 +1258,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         assumeTrue(animated)
         val design = design(default)
         val spec = readAnimation(design).normalized()
-        val animator = LayerAnimator(spec.layers, spec.lets)
+        val animator = LayerAnimator(spec.layers, spec.lets, functions = spec.functions)
         assertWithMessage("${animator.errors}").that(animator.errors).isEmpty()
         // One layer for each of the design: the moon is in plain layers, so it moves
         assertThat(animator.size).isEqualTo(design.getJSONObject(WakeAnimationSpec.JSON_KEY).getJSONArray("layers").length())
@@ -1674,6 +1780,22 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
 
         /** The views: the white cap of the glucose value and the shade behind the texts. */
         const val CAP_VIEW = "freetext1"
+
+        /** The views that show the time and the glucose in the design for plain AAPS; text layers in the animated one. */
+        val TEXT_VIEWS = listOf("time", "hour", "minute", "sgv", CAP_VIEW)
+
+        /** The own function of the animated design that gives the glucose as a text. */
+        const val BG_FUNCTION = "bg"
+
+        /** From this many minutes on a glucose value is old and gets a line through it (as `BaseWatchFace.ageLevel`). */
+        const val STALE_MINUTES = 12
+
+        /** The line through an old value: how far above the baseline (in parts of the text size), and how thick. */
+        const val STRIKE_ABOVE = 0.3
+        const val STRIKE_HEIGHT = 5
+
+        /** One mmol/L in mg/dL as the watch counts it (`Constants.MMOLL_TO_MGDL`); the phone text of the tests uses [MGDL_PER_MMOL]. */
+        const val WATCH_MGDL_PER_MMOL = 18.01559
         const val SHADE_VIEW = "cover_chart"
 
         /** The shade: where, how dark in its middle (0 to 255), and how much of it is fully dark (0 to 1 of its radius). */
@@ -1804,6 +1926,12 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
          * `timeLefts`).
          */
         const val SIDEWAYS_TOLERANCE = CAP_TOLERANCE + 1f
+
+        /**
+         * How far the snow of a text layer may lie beside its place on the digit, in screen pixels. Both layers have
+         * one place; what is left is how the middle of a thin digit is measured at another part of a pixel.
+         */
+        const val LAYER_TOLERANCE = 1f
 
         /**
          * How far the height of the snow on a digit may be from the expected one, in pixels: both edges
