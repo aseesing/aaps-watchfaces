@@ -30,8 +30,8 @@ import app.aaps.wear.health.HealthKind
 import app.aaps.wear.watchfaces.animation.WakeAnimationSpec
 import app.aaps.wear.watchfaces.daynight.DayNightClock
 import app.aaps.wear.watchfaces.daynight.MoonPicture
-import app.aaps.wear.watchfaces.design.LegacyDesign
-import app.aaps.wear.watchfaces.design.LegacyDesign.Orbit
+import app.aaps.watchfaces.shorthand.DesignShorthand
+import app.aaps.watchfaces.shorthand.DesignShorthand.Orbit
 import app.aaps.wear.watchfaces.utils.WatchBatteryLevel
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
@@ -279,7 +279,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
             // The moon is drawn by the watch from its photo, lit and turned as it is in the sky now (see MoonPicture)
             val moonTop = skyOrbit(JsonKeyValues.MOON_CYCLE.key).point(0.25)
             place(MOON_VIEW, (moonTop.first - MOON_DISC / 2f).toInt(), (moonTop.second - MOON_DISC / 2f).toInt(), MOON_DISC)
-                .put("textvalue", "").put(LegacyDesign.MOON_LIGHT_KEY, true).put("orbit", skyOrbitJson(JsonKeyValues.MOON_CYCLE.key)).put("dynPref", DISC_HIDE)
+                .put("textvalue", "").put(DesignShorthand.MOON_LIGHT_KEY, true).put("orbit", skyOrbitJson(JsonKeyValues.MOON_CYCLE.key)).put("dynPref", DISC_HIDE)
         }
 
         // The glucose hand on its scale, and the battery hands: pictures that the watch turns with the value
@@ -328,10 +328,10 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
             )
 
             // The weather: a cloud over the sun and the moon, a grey sky when it is cloudy or rains
-            put(LegacyDesign.WEATHER_LOOKS_KEY, JSONObject().apply {
-                put(EventData.Weather.PARTLY, JSONObject().put(LegacyDesign.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_PARTLY)))
-                put(EventData.Weather.CLOUDY, JSONObject().put(LegacyDesign.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_CLOUDY).put(ResFileMap.COVER_CHART.fileName, SKY_CLOUDY)))
-                put(EventData.Weather.RAIN, JSONObject().put(LegacyDesign.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_RAIN).put(ResFileMap.COVER_CHART.fileName, SKY_RAIN)))
+            put(DesignShorthand.WEATHER_LOOKS_KEY, JSONObject().apply {
+                put(EventData.Weather.PARTLY, JSONObject().put(DesignShorthand.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_PARTLY)))
+                put(EventData.Weather.CLOUDY, JSONObject().put(DesignShorthand.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_CLOUDY).put(ResFileMap.COVER_CHART.fileName, SKY_CLOUDY)))
+                put(EventData.Weather.RAIN, JSONObject().put(DesignShorthand.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_RAIN).put(ResFileMap.COVER_CHART.fileName, SKY_RAIN)))
             })
         }
     }
@@ -833,12 +833,14 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
     fun buildsTheZipAndItsPreview() {
         val default = defaultDesign()
         val design = design(default)
-        val json = design.toString(4)
         val images = images()
+        // The zip holds the design in the form the watch reads
+        val watchDesign = forWatch(design, images.keys + fonts().keys)
+        val json = watchDesign.toString(4)
         val previewImage = preview(design, default, images, previewInstant) { applyOptions(it, previewOptions) }
         val jpg = ByteArrayOutputStream().also { previewImage.compress(Bitmap.CompressFormat.JPEG, PREVIEW_QUALITY, it) }.toByteArray()
         // The json without spaces: the phone sends the files unpacked, and every kilobyte counts (see MAX_UNPACKED_BYTES)
-        val zip = zip(design.toString(), jpg, images)
+        val zip = zip(watchDesign.toString(), jpg, images)
         File(out, "$fileName.zip").writeBytes(zip)
         File(out, "$fileName.png").writeBytes(pngBytes(previewImage))
         println("$fileName.zip: ${zip.size} bytes")
@@ -847,7 +849,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         println("$fileName unpacked: $unpacked bytes")
         assertWithMessage("unpacked").that(unpacked).isAtMost(MAX_UNPACKED_BYTES)
         // No picture ends with "Day": the watch would show it in the place of another one
-        for (name in images.keys) assertWithMessage(name).that(name.endsWith(LegacyDesign.DAY_SUFFIX)).isFalse()
+        for (name in images.keys) assertWithMessage(name).that(name.endsWith(DesignShorthand.DAY_SUFFIX)).isFalse()
 
         val loaded = ZipWatchfaceFormat.loadCustomWatchface(zip, "$fileName.zip", authorization = true)
         assertThat(loaded).isNotNull()
@@ -871,9 +873,9 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         assertThat(images.keys + fonts().keys).containsAtLeastElementsIn(named)
         // The font licence goes with the font
         assertThat(ZipInputStream(zip.inputStream()).use { input -> generateSequence { input.nextEntry }.map { it.name }.toList() }).contains(FONT_LICENCE)
-        if (animated) design.getJSONObject(LegacyDesign.WEATHER_LOOKS_KEY).let { weatherLooks ->
+        if (animated) design.getJSONObject(DesignShorthand.WEATHER_LOOKS_KEY).let { weatherLooks ->
             weatherLooks.keys().forEach { weather ->
-                weatherLooks.getJSONObject(weather).getJSONObject(LegacyDesign.IMAGES_KEY).let { swaps ->
+                weatherLooks.getJSONObject(weather).getJSONObject(DesignShorthand.IMAGES_KEY).let { swaps ->
                     swaps.keys().forEach { assertWithMessage("$weather $it").that(images.keys).containsAtLeast(it, swaps.getString(it)) }
                 }
             }
@@ -1291,9 +1293,9 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         val design = design(defaultDesign())
         val text = design.toString()
         assertThat(design.has(WakeAnimationSpec.JSON_KEY)).isFalse()
-        assertThat(design.has(LegacyDesign.WEATHER_LOOKS_KEY)).isFalse()
-        assertThat(design.has(LegacyDesign.DAY_LOOK_KEY)).isFalse()
-        assertThat(text).doesNotContain(LegacyDesign.MOON_LIGHT_KEY)
+        assertThat(design.has(DesignShorthand.WEATHER_LOOKS_KEY)).isFalse()
+        assertThat(design.has(DesignShorthand.DAY_LOOK_KEY)).isFalse()
+        assertThat(text).doesNotContain(DesignShorthand.MOON_LIGHT_KEY)
         assertThat(text).doesNotContain("\"orbit\"")
         assertThat(text).doesNotContain(WatchBatteryLevel.KEY)
         assertThat(text).doesNotContain(JsonKeyValues.SUN_CYCLE.key)

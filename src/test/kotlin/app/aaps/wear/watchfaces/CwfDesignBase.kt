@@ -34,7 +34,7 @@ import app.aaps.wear.health.healthComplicationData
 import app.aaps.wear.phonepreview.DesignAccess
 import app.aaps.wear.phonepreview.PreviewHost
 import app.aaps.wear.watchfaces.animation.WakeAnimationSpec
-import app.aaps.wear.watchfaces.design.LegacyDesign
+import app.aaps.watchfaces.shorthand.DesignShorthand
 import com.google.common.truth.Truth.assertWithMessage
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -209,23 +209,23 @@ abstract class CwfDesignBase {
     private fun formatOf(bytes: ByteArray) = if (isJpeg(bytes)) ResFormat.JPG else ResFormat.PNG
 
     /**
-     * [design] in [weather], with the weather look laid over it, still in the old form these generators
-     * write (the watch reads it through `LegacyDesign`, the same as the watch did before). These designs
-     * have no day look, so the watch asks for the night.
+     * [design] in [weather], with the weather look laid over it, still in the short form these
+     * generators write (see [DesignShorthand]). These designs have no day look, so the watch asks for
+     * the night.
      */
     protected fun lookOf(design: JSONObject, weather: String?): JSONObject {
         val result = JSONObject(design.toString())
-        result.remove(LegacyDesign.DAY_LOOK_KEY)
-        result.remove(LegacyDesign.WEATHER_LOOKS_KEY)
-        result.remove(LegacyDesign.IMAGES_KEY)
-        weather?.let { w -> design.optJSONObject(LegacyDesign.WEATHER_LOOKS_KEY)?.let { looks -> looks.optJSONObject("night_$w") ?: looks.optJSONObject(w) } }?.let { merge(result, it) }
+        result.remove(DesignShorthand.DAY_LOOK_KEY)
+        result.remove(DesignShorthand.WEATHER_LOOKS_KEY)
+        result.remove(DesignShorthand.IMAGES_KEY)
+        weather?.let { w -> design.optJSONObject(DesignShorthand.WEATHER_LOOKS_KEY)?.let { looks -> looks.optJSONObject("night_$w") ?: looks.optJSONObject(w) } }?.let { merge(result, it) }
         return result
     }
 
     /** The pictures the watch uses for [look] (made by [lookOf]): [images] with the swaps the look names. */
     protected fun lookImages(look: JSONObject, images: Map<String, ByteArray>): Map<String, ByteArray> {
         val result = images.toMutableMap()
-        look.optJSONObject(LegacyDesign.IMAGES_KEY)?.let { swaps -> swaps.keys().forEach { target -> images[swaps.optString(target)]?.let { result[target] = it } } }
+        look.optJSONObject(DesignShorthand.IMAGES_KEY)?.let { swaps -> swaps.keys().forEach { target -> images[swaps.optString(target)]?.let { result[target] = it } } }
         return result
     }
 
@@ -244,11 +244,17 @@ abstract class CwfDesignBase {
     }
 
     /**
-     * The `use` entries of [template] in the animation of [design] as the watch reads it: the old keys
-     * rewritten into the new form (see `LegacyDesign`), in their order.
+     * [design] in the form the watch reads, as it goes into the zip: the short keys of the generators
+     * rewritten (see [DesignShorthand]). [resources] are the names of the pictures and fonts in the zip.
+     */
+    protected fun forWatch(design: JSONObject, resources: Set<String>): JSONObject = DesignShorthand.translate(design, resources)
+
+    /**
+     * The `use` entries of [template] in the animation of [design] as the watch reads it (see
+     * [forWatch]), in their order.
      */
     protected fun uses(design: JSONObject, template: String): List<JSONObject> {
-        val layers = DesignAccess.translate(design).optJSONObject(WakeAnimationSpec.JSON_KEY)?.optJSONArray("layers") ?: return emptyList()
+        val layers = DesignShorthand.translate(design).optJSONObject(WakeAnimationSpec.JSON_KEY)?.optJSONArray("layers") ?: return emptyList()
         return (0 until layers.length()).mapNotNull { layers.optJSONObject(it) }.filter { it.optString("use") == template }
     }
 
@@ -279,7 +285,7 @@ abstract class CwfDesignBase {
         face.sp.putLong(R.string.key_weather_time, instant)
         prefs(face)
         val resData = resources(default, images)
-        runBlocking { face.complicationDataRepository.storeCustomWatchface(CwfData(design.toString(4), ZipWatchfaceFormat.loadMetadata(design), resData)) }
+        runBlocking { face.complicationDataRepository.storeCustomWatchface(CwfData(forWatch(design, resData.keys).toString(4), ZipWatchfaceFormat.loadMetadata(design), resData)) }
         Thread.sleep(600)   // past the render data share window
         Settings.System.putString(RuntimeEnvironment.getApplication().contentResolver, Settings.System.TIME_12_24, "24")
         face.refreshRenderData()
@@ -455,7 +461,7 @@ abstract class CwfDesignBase {
     /** The wake-up animation of [design] as the watch reads it, with the pictures of [images]. */
     protected fun readAnimation(design: JSONObject, images: Map<String, ByteArray> = images()): WakeAnimationSpec {
         val resources = RuntimeEnvironment.getApplication().resources
-        return DesignAccess.readWakeAnimation(CustomWatchface(), design) { key -> images[key]?.let { ResData(it, ResFormat.PNG).toDrawable(resources) } }!!
+        return DesignAccess.readWakeAnimation(CustomWatchface(), DesignShorthand.translate(design)) { key -> images[key]?.let { ResData(it, ResFormat.PNG).toDrawable(resources) } }!!
     }
 
     /** The highest luminance in a square of [half] around [point] of [bitmap]. */

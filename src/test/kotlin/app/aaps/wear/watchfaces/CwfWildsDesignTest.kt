@@ -21,7 +21,7 @@ import app.aaps.core.interfaces.rx.weardata.EventData
 import app.aaps.shared.impl.weardata.JsonKeyValues
 import app.aaps.shared.impl.weardata.ResFileMap
 import app.aaps.wear.watchfaces.daynight.DayNightClock
-import app.aaps.wear.watchfaces.design.LegacyDesign
+import app.aaps.watchfaces.shorthand.DesignShorthand
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import org.json.JSONObject
@@ -83,9 +83,9 @@ class CwfWildsDesignTest : CyberpunkDesignBase() {
         putSun()
         // The beating drop for a few seconds after the wrist is raised
         put("animation", animation())
-        put(LegacyDesign.WEATHER_LOOKS_KEY, JSONObject().apply {
+        put(DesignShorthand.WEATHER_LOOKS_KEY, JSONObject().apply {
             for (weather in listOf(EventData.Weather.PARTLY, EventData.Weather.CLOUDY, EventData.Weather.RAIN))
-                put(weather, JSONObject().put(LegacyDesign.IMAGES_KEY, JSONObject().put(ResFileMap.BACKGROUND.fileName, backgroundName(weather))).apply {
+                put(weather, JSONObject().put(DesignShorthand.IMAGES_KEY, JSONObject().put(ResFileMap.BACKGROUND.fileName, backgroundName(weather))).apply {
                     if (weather == EventData.Weather.RAIN) put("animation", JSONObject().put("rain", rain(RAIN_COLOR, RAIN_ALPHA)))
                 })
         })
@@ -296,7 +296,7 @@ class CwfWildsDesignTest : CyberpunkDesignBase() {
             for (key in listOf("midColor", "highColor", "lowColor", "reservoirColor"))
                 assertWithMessage("$weather $key").that(contrast(look.getString(key), parchment)).isAtLeast(4.5)
             // Its own landscape, the panels shown
-            val swapped = look.optJSONObject(LegacyDesign.IMAGES_KEY)?.optString(ResFileMap.BACKGROUND.fileName) ?: ResFileMap.BACKGROUND.fileName
+            val swapped = look.optJSONObject(DesignShorthand.IMAGES_KEY)?.optString(ResFileMap.BACKGROUND.fileName) ?: ResFileMap.BACKGROUND.fileName
             assertWithMessage("$weather landscape").that(swapped).isEqualTo(backgroundName(weather))
             assertThat(look.getJSONObject("cover_chart").getString("visibility")).isEqualTo("visible")
         }

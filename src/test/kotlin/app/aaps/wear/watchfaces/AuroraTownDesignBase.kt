@@ -35,7 +35,7 @@ import app.aaps.wear.watchfaces.animation.WakeAnimationSpec
 import app.aaps.wear.watchfaces.animation.WakeAnimator
 import app.aaps.wear.watchfaces.animation.WakeTimer
 import app.aaps.wear.watchfaces.daynight.DayNightClock
-import app.aaps.wear.watchfaces.design.LegacyDesign
+import app.aaps.watchfaces.shorthand.DesignShorthand
 import app.aaps.wear.watchfaces.daynight.GeoPoint
 import app.aaps.wear.watchfaces.daynight.MoonLight
 import app.aaps.wear.watchfaces.daynight.MoonPhase
@@ -412,7 +412,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
     private fun moonLayer(): JSONObject {
         val half = AuroraTownImages.MOON_SIZE / 2f
         val box = rect((AuroraTownImages.MOON_X - half).roundToInt().toFloat(), (AuroraTownImages.MOON_Y - half).roundToInt().toFloat(), AuroraTownImages.MOON_SIZE, AuroraTownImages.MOON_SIZE)
-        return JSONObject().put(LegacyDesign.MOON_KEY, true).put("rect", box).put("slot", "back").put("rest", 0)
+        return JSONObject().put(DesignShorthand.MOON_KEY, true).put("rect", box).put("slot", "back").put("rest", 0)
     }
 
     /** The light of the star ([AuroraTownImages.starGlow]), screened over the gold star of the photo. */
@@ -733,8 +733,10 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
     @Test
     fun buildsTheZipAndItsPreview() {
         val design = design(default)
-        val json = design.toString(4)
         val images = images()
+        // The zip holds the design in the form the watch reads
+        val watchDesign = forWatch(design, images.keys + fonts().keys)
+        val json = watchDesign.toString(4)
         // A wake always starts with the frame at 0 ms
         val previewImage = if (animated) wakeFrames(listOf(0L, PREVIEW_WAKE_MS)).getValue(PREVIEW_WAKE_MS)!! else face(PREVIEW_MS).second // with a glucose in the unit of the design
         val jpg = ByteArrayOutputStream().also { previewImage.compress(Bitmap.CompressFormat.JPEG, PREVIEW_QUALITY, it) }.toByteArray()
@@ -743,7 +745,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         File(out, "$fileName.png").writeBytes(pngBytes(previewImage))
         println("$fileName.zip: ${zip.size} bytes (preview ${jpg.size}, json ${json.length})")
         assertThat(zip.size).isAtMost(MAX_ZIP_BYTES)
-        for (name in images.keys) assertWithMessage(name).that(name.endsWith(LegacyDesign.DAY_SUFFIX)).isFalse()
+        for (name in images.keys) assertWithMessage(name).that(name.endsWith(DesignShorthand.DAY_SUFFIX)).isFalse()
 
         val loaded = ZipWatchfaceFormat.loadCustomWatchface(zip, "$fileName.zip", authorization = true)
         assertThat(loaded).isNotNull()
@@ -771,9 +773,9 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         val design = design(default)
         val text = design.toString()
         assertThat(design.has(WakeAnimationSpec.JSON_KEY)).isFalse()
-        assertThat(text).doesNotContain(LegacyDesign.MOON_LIGHT_KEY)
-        assertThat(design.has(LegacyDesign.WEATHER_LOOKS_KEY)).isFalse()
-        assertThat(design.has(LegacyDesign.DAY_LOOK_KEY)).isFalse()
+        assertThat(text).doesNotContain(DesignShorthand.MOON_LIGHT_KEY)
+        assertThat(design.has(DesignShorthand.WEATHER_LOOKS_KEY)).isFalse()
+        assertThat(design.has(DesignShorthand.DAY_LOOK_KEY)).isFalse()
         val views = ViewKeys.entries.map { it.key }.toSet()
         val keys = JsonKeys.entries.map { it.key }.toSet()
         for (key in design.keys()) {

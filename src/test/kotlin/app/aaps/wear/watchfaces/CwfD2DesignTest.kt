@@ -38,7 +38,7 @@ import app.aaps.wear.watchfaces.animation.WakeAnimator
 import app.aaps.wear.watchfaces.animation.WakeTimer
 import app.aaps.wear.watchfaces.colour.ColourLooks
 import app.aaps.wear.watchfaces.daynight.DayNightClock
-import app.aaps.wear.watchfaces.design.LegacyDesign
+import app.aaps.watchfaces.shorthand.DesignShorthand
 import app.aaps.wear.watchfaces.daynight.MoonPicture
 import app.aaps.wear.watchfaces.daynight.StoredWeather
 import app.aaps.wear.watchfaces.utils.DesignTimeText
@@ -245,7 +245,7 @@ class CwfD2DesignTest : CwfDesignBase() {
         text("day_name", DAY_NAME_BOX, DAY_NAME_SIZE, "center", WHITE).put("allCaps", true)
         text("day", DAY_BOX, DAY_SIZE, "center", COLOUR_2)
         // The moon is drawn by the watch, from a photo it carries: lit and turned as it is in the sky now
-        place(MOON_VIEW, MOON_BOX.left.toInt(), MOON_BOX.top.toInt(), MOON_BOX.width().toInt(), MOON_BOX.height().toInt()).put("textvalue", "").put(LegacyDesign.MOON_LIGHT_KEY, true)
+        place(MOON_VIEW, MOON_BOX.left.toInt(), MOON_BOX.top.toInt(), MOON_BOX.width().toInt(), MOON_BOX.height().toInt()).put("textvalue", "").put(DesignShorthand.MOON_LIGHT_KEY, true)
         // The colon between them is a picture (see colonPicture), in the same colour
         text("hour", HOUR_BOX, TIME_SIZE, "right", COLOUR_1)
         text("minute", MINUTE_BOX, TIME_SIZE, "left", COLOUR_1)
@@ -298,7 +298,7 @@ class CwfD2DesignTest : CwfDesignBase() {
             .put(TEMPERATURE_DYN, JSONObject().put("valueKey", StoredWeather.JSON_VALUE_KEY).put("textvalue1", "%.0f°").put("invalidTextvalue", ""))
 
         // The weather: the icon of each kind, by day and by night. Without a weather (none, or too old) no icon.
-        put(LegacyDesign.WEATHER_LOOKS_KEY, JSONObject().apply {
+        put(DesignShorthand.WEATHER_LOOKS_KEY, JSONObject().apply {
             for ((weather, icons) in WEATHER_ICONS)
                 put(weather, JSONObject().put("dynData", JSONObject().put(WEATHER_ICON_DYN, weatherIconDynData(icons.first, icons.second))))
         })
@@ -1352,8 +1352,10 @@ class CwfD2DesignTest : CwfDesignBase() {
     fun buildsTheZipAndItsPreview() {
         val default = defaultDesign()
         val design = design(default)
-        val json = design.toString(4)
         val images = images()
+        // The zip holds the design in the form the watch reads
+        val watchDesign = forWatch(design, images.keys + fonts().keys)
+        val json = watchDesign.toString(4)
         val previewImage = render()
         val jpg = ByteArrayOutputStream().also { previewImage.compress(Bitmap.CompressFormat.JPEG, 88, it) }.toByteArray()
         val zip = zip(json, jpg, images)
@@ -1623,7 +1625,7 @@ class CwfD2DesignTest : CwfDesignBase() {
     @Test
     fun theMoonIsDrawnByTheWatchAsItIsNow() {
         val view = design(defaultDesign()).getJSONObject(MOON_VIEW)
-        assertThat(view.optBoolean(LegacyDesign.MOON_LIGHT_KEY)).isTrue()
+        assertThat(view.optBoolean(DesignShorthand.MOON_LIGHT_KEY)).isTrue()
         assertThat(view.has("dynData")).isFalse()
         assertWithMessage("moon and the widest day").that(MOON_BOX.right).isAtMost(DAY_BOX.centerX() - (1..31).maxOf { textWidth("$it", DAY_SIZE) } / 2 - 4f)
         assertWithMessage("moon and the panel edge").that(MOON_BOX.left).isAtLeast(TIME_PANEL.left + 3f)

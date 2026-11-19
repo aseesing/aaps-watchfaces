@@ -32,8 +32,8 @@ import app.aaps.wear.R
 import app.aaps.wear.health.HealthKind
 import app.aaps.wear.watchfaces.animation.LayerSlot
 import app.aaps.wear.watchfaces.animation.LayerSource
-import app.aaps.wear.watchfaces.design.LegacyDesign
-import app.aaps.wear.watchfaces.design.LegacyDesign.Orbit
+import app.aaps.watchfaces.shorthand.DesignShorthand
+import app.aaps.watchfaces.shorthand.DesignShorthand.Orbit
 import app.aaps.wear.watchfaces.utils.GlucoseLine
 import app.aaps.wear.watchfaces.utils.WatchBatteryLevel
 import com.google.common.truth.Truth.assertThat
@@ -62,7 +62,7 @@ import kotlin.math.sqrt
  * The designs are separate faces; the wearer picks one for the day and one for the night in AAPS, and
  * the watch switches between the two whole designs at sunrise and sunset. So no design has a day
  * look (`dayLook`) any more. A design may still have looks for the weather (`weatherLooks`), keyed
- * by the weather alone (`partly`, `cloudy`, `rain`), see `DayOverlay.apply` (now `LegacyDesign`).
+ * by the weather alone (`partly`, `cloudy`, `rain`), see `DayOverlay.apply` (now `DesignShorthand`).
  *
  * - [CwfTechDesignTest]: "Cyberpunk Tech", the dark neon HUD with the moon on the edge.
  * - [CwfYellowDesignTest]: "Cyberpunk Yellow", signal yellow with black panels and the sun.
@@ -829,8 +829,10 @@ abstract class CyberpunkDesignBase : CwfDesignBase() {
     fun buildsTheZipAndItsPreview() {
         val default = defaultDesign()
         val design = design(default)
-        val json = design.toString(4)
         val images = images()
+        // The zip holds the design in the form the watch reads
+        val watchDesign = forWatch(design, images.keys + fonts().keys)
+        val json = watchDesign.toString(4)
         val previewImage = preview(design, default, images, previewInstant)
         val jpg = ByteArrayOutputStream().also { previewImage.compress(Bitmap.CompressFormat.JPEG, 88, it) }.toByteArray()
         val zip = zip(json, jpg, images)
@@ -842,11 +844,11 @@ abstract class CyberpunkDesignBase : CwfDesignBase() {
 
         // A whole design for day or night: no day look, and weather looks only by the weather alone
         assertThat(design.has("dayLook")).isFalse()
-        design.optJSONObject(LegacyDesign.WEATHER_LOOKS_KEY)?.keys()?.forEach {
+        design.optJSONObject(DesignShorthand.WEATHER_LOOKS_KEY)?.keys()?.forEach {
             assertWithMessage("weather look $it").that(it).isIn(listOf(EventData.Weather.PARTLY, EventData.Weather.CLOUDY, EventData.Weather.RAIN))
         }
         // No picture ends with "Day": the watch would show it in the place of another one
-        for (name in images.keys) assertWithMessage(name).that(name.endsWith(LegacyDesign.DAY_SUFFIX)).isFalse()
+        for (name in images.keys) assertWithMessage(name).that(name.endsWith(DesignShorthand.DAY_SUFFIX)).isFalse()
 
         // The phone accepts it: it needs a name and a preview image
         val loaded = ZipWatchfaceFormat.loadCustomWatchface(zip, "$fileName.zip", authorization = true)
@@ -872,9 +874,9 @@ abstract class CyberpunkDesignBase : CwfDesignBase() {
         assertThat(loaded.cwfData.resData.keys).containsAtLeastElementsIn(batteryImages().keys)
         if (fontFile.exists()) assertThat(loaded.cwfData.resData[CUSTOM_FONT]?.format).isEqualTo(ResFormat.TTF)
         // Every picture a look swaps in is in the zip
-        design.optJSONObject(LegacyDesign.WEATHER_LOOKS_KEY)?.let { weatherLooks ->
+        design.optJSONObject(DesignShorthand.WEATHER_LOOKS_KEY)?.let { weatherLooks ->
             weatherLooks.keys().forEach { weather ->
-                weatherLooks.getJSONObject(weather).optJSONObject(LegacyDesign.IMAGES_KEY)?.let { swaps ->
+                weatherLooks.getJSONObject(weather).optJSONObject(DesignShorthand.IMAGES_KEY)?.let { swaps ->
                     swaps.keys().forEach { assertWithMessage("$weather $it").that(loaded.cwfData.resData.keys).contains(swaps.getString(it)) }
                 }
             }

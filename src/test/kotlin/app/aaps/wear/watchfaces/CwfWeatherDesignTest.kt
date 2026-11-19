@@ -14,7 +14,7 @@ import app.aaps.core.interfaces.rx.weardata.EventData
 import app.aaps.shared.impl.weardata.JsonKeyValues
 import app.aaps.shared.impl.weardata.ResFileMap
 import app.aaps.wear.watchfaces.daynight.DayNightClock
-import app.aaps.wear.watchfaces.design.LegacyDesign
+import app.aaps.watchfaces.shorthand.DesignShorthand
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import org.json.JSONObject
@@ -65,7 +65,7 @@ class CwfWeatherDesignTest : CyberpunkDesignBase() {
         // Short glitch bands and the beating drop for a few seconds after the wrist is raised
         put("animation", animation(glitch = glitch(SUNNY.accent)))
         put(
-            LegacyDesign.WEATHER_LOOKS_KEY, JSONObject()
+            DesignShorthand.WEATHER_LOOKS_KEY, JSONObject()
                 .put(EventData.Weather.PARTLY, weatherLook(PARTLY))
                 .put(EventData.Weather.CLOUDY, weatherLook(CLOUDY))
                 .put(EventData.Weather.RAIN, weatherLook(CLOUDY, rain = true))
@@ -74,7 +74,7 @@ class CwfWeatherDesignTest : CyberpunkDesignBase() {
 
     /** The look of [p]: its colours, its pictures and its glitch colour, and dark rain when it [rain]s. */
     private fun weatherLook(p: DayPalette, rain: Boolean = false): JSONObject = paletteColors(p).apply {
-        put(LegacyDesign.IMAGES_KEY, JSONObject().apply { for (name in pictureNames) put(name, name + p.name) })
+        put(DesignShorthand.IMAGES_KEY, JSONObject().apply { for (name in pictureNames) put(name, name + p.name) })
         put("animation", JSONObject().put("glitch", glitch(p.accent)).apply { if (rain) put("rain", rain(p.ink, DAY_RAIN_ALPHA)) })
     }
 

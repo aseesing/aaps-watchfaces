@@ -28,7 +28,7 @@ import app.aaps.wear.watchfaces.animation.DesignRect
 import app.aaps.wear.watchfaces.animation.WakeAnimator
 import app.aaps.wear.watchfaces.animation.WakeTimer
 import app.aaps.wear.watchfaces.daynight.DayNightClock
-import app.aaps.wear.watchfaces.design.LegacyDesign
+import app.aaps.watchfaces.shorthand.DesignShorthand
 import app.aaps.wear.watchfaces.daynight.MoonPicture
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
@@ -94,7 +94,7 @@ class CwfTechDesignTest : CyberpunkDesignBase() {
         // place in the json is the middle of its way; the watch moves it (see orbit).
         val top = orbit(JsonKeyValues.NIGHT_PROGRESS.key).point(0.5)
         place("freetext4", (top.first - MOON_SIZE / 2f).toInt(), (top.second - MOON_SIZE / 2f).toInt(), MOON_SIZE)
-            .put("textvalue", "").put(LegacyDesign.MOON_LIGHT_KEY, true).put("orbit", orbitJson(JsonKeyValues.NIGHT_PROGRESS.key))
+            .put("textvalue", "").put(DesignShorthand.MOON_LIGHT_KEY, true).put("orbit", orbitJson(JsonKeyValues.NIGHT_PROGRESS.key))
         // A cloud in front of the moon, only when the weather is cloudy (see the weather looks)
         place("patient_name", (top.first - CLOUD_SIZE / 2f).toInt(), (top.second - CLOUD_SIZE / 2f).toInt(), CLOUD_SIZE)
             .put("visibility", "gone").put("textvalue", "").put("fontColor", CLEAR).put("background", CLOUD_NIGHT_PARTLY)
@@ -105,7 +105,7 @@ class CwfTechDesignTest : CyberpunkDesignBase() {
 
         // A cloud covers part (partly) or most (cloudy, rain) of the moon
         put(
-            LegacyDesign.WEATHER_LOOKS_KEY, JSONObject()
+            DesignShorthand.WEATHER_LOOKS_KEY, JSONObject()
                 .put(EventData.Weather.PARTLY, cloud(CLOUD_NIGHT_PARTLY))
                 .put(EventData.Weather.CLOUDY, cloud(CLOUD_NIGHT_FULL))
                 .put(EventData.Weather.RAIN, cloud(CLOUD_NIGHT_FULL))
@@ -154,7 +154,7 @@ class CwfTechDesignTest : CyberpunkDesignBase() {
     @Test
     fun theWatchDrawsTheMoon() {
         val moon = design(defaultDesign()).getJSONObject("freetext4")
-        assertThat(moon.optBoolean(LegacyDesign.MOON_LIGHT_KEY)).isTrue()
+        assertThat(moon.optBoolean(DesignShorthand.MOON_LIGHT_KEY)).isTrue()
         assertThat(moon.has("dynData")).isFalse()
         assertThat(moon.getInt("width")).isEqualTo(MOON_SIZE)
         assertThat(images().keys.filter { it.startsWith("Moon") }).isEmpty()
