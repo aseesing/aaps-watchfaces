@@ -1269,9 +1269,8 @@ class CwfD2DesignTest : CwfDesignBase() {
         val design = design(default)
         val face = storedFace(design, default, images(), instant, weather, watch)
         face.sp.putString(R.string.key_weather_temperature, temperature?.toString() ?: "")
-        // Amsterdam, for the sunrise and sunset; NaN is no place
-        face.sp.putDouble(R.string.key_location_latitude, if (place) 52.37 else Double.NaN)
-        face.sp.putDouble(R.string.key_location_longitude, if (place) 4.90 else Double.NaN)
+        // Amsterdam, for the sunrise and sunset
+        if (place) storePlace(face, 52.37, 4.90) else clearPlace(face)
         face.sp.putString(R.string.key_cwf_colour_1, colours.first)
         face.sp.putString(R.string.key_cwf_colour_2, colours.second)
         face.sp.putBoolean(R.string.key_graph_log_time, logGraph)

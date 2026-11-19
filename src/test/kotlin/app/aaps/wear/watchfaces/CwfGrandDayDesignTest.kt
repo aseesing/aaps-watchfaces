@@ -16,7 +16,7 @@ import org.robolectric.annotation.GraphicsMode
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35])
-class CwfGrandDayDesignTest : GrandComplicationDesignBase() {
+open class CwfGrandDayDesignTest : GrandComplicationDesignBase() {
 
     override val displayName = "Grand Complication Day"
     override val fileName = "Grand_Complication_Day"

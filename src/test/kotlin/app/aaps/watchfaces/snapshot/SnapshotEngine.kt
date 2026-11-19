@@ -1,5 +1,6 @@
 package app.aaps.watchfaces.snapshot
 
+import app.aaps.core.interfaces.rx.weardata.DayNightRule
 import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
@@ -118,9 +119,10 @@ class SnapshotEngine(private val app: Application) {
     private fun messages(data: SnapshotData, now: Long): List<EventData> = listOf(
         EventData.Preferences(
             timeStamp = now, wearControl = false, unitsMgdl = false, bolusPercentage = 100, maxCarbs = 100, maxBolus = 10.0,
-            insulinButtonIncrement1 = 0.5, insulinButtonIncrement2 = 1.0, carbsButtonIncrement1 = 5, carbsButtonIncrement2 = 10,
-            latitude = data.latitude, longitude = data.longitude
+            insulinButtonIncrement1 = 0.5, insulinButtonIncrement2 = 1.0, carbsButtonIncrement1 = 5, carbsButtonIncrement2 = 10
         ),
+        // The place of the phone, as the watch gets it: as the rule for when it is day
+        EventData.ActionSetDayNightRule(DayNightRule.Place(data.latitude, data.longitude)),
         EventData.SingleBg(
             dataset = 0, timeStamp = now - 2 * MINUTE, sgvString = "6,7", glucoseUnits = "mmol", slopeArrow = "→",
             delta = "+0,1", deltaDetailed = "+0,12", avgDelta = "+0,1", avgDeltaDetailed = "+0,08", sgvLevel = 0, sgv = 121.0,

@@ -21,28 +21,35 @@ import app.aaps.core.interfaces.rx.weardata.CwfMetadataKey
 import app.aaps.core.interfaces.rx.weardata.EventData
 import app.aaps.core.interfaces.rx.weardata.ResFormat
 import app.aaps.shared.impl.weardata.JsonKeyValues
+import app.aaps.shared.impl.weardata.JsonKeys
 import app.aaps.shared.impl.weardata.ResFileMap
+import app.aaps.shared.impl.weardata.ViewKeys
 import app.aaps.shared.impl.weardata.ZipWatchfaceFormat
+import app.aaps.wear.R
 import app.aaps.wear.health.HealthKind
+import app.aaps.wear.watchfaces.animation.WakeAnimationSpec
 import app.aaps.wear.watchfaces.daynight.DayNightClock
-import app.aaps.wear.watchfaces.design.LegacyDesign
 import app.aaps.wear.watchfaces.daynight.MoonPicture
+import app.aaps.wear.watchfaces.design.LegacyDesign
 import app.aaps.wear.watchfaces.design.LegacyDesign.Orbit
 import app.aaps.wear.watchfaces.utils.WatchBatteryLevel
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import org.json.JSONArray
 import org.json.JSONObject
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.time.LocalDateTime
 import java.time.ZoneId
+import java.util.zip.ZipInputStream
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * "Grand Complication": an analog dress watch, made after the grand complications of the old watch
@@ -61,9 +68,24 @@ import kotlin.math.sin
  *   no number; at 20 % or less the hand is red, and it blinks while the wake-up animation plays.
  *
  * The age of the glucose value and a loop warning show in red under the window, only when old. No
- * graph, no seconds hand, no IOB and COB: the face stays calm. Two designs share all of this, a day
- * face ([CwfGrandDayDesignTest], cream and blue) and a night face ([CwfGrandNightDesignTest], midnight
+ * graph, no seconds hand: the face stays calm. Two designs share all of this, a day face
+ * ([CwfGrandDayDesignTest], cream and blue) and a night face ([CwfGrandNightDesignTest], midnight
  * blue and gold).
+ *
+ * Two things the wearer chooses with the normal AAPS settings, no other zip needed:
+ *
+ * - **Any complication in the sky disc**: with "Complication 1" on in the settings of the watch face,
+ *   the disc shows the complication the wearer picks there (its slot, [DISC_SLOT], has the disc as a
+ *   round window behind it). It wins over IOB and COB.
+ * - **IOB and COB in the sky disc**: with "Show IOB" or "Show COB" on (watch: AAPS, Settings,
+ *   Display) the disc becomes a small window with the IOB and the COB, one or both. The sun, the moon
+ *   and the land go away then (a dynPref on each). With both off, the disc shows the sky; in the
+ *   copy for plain AAPS (no sun and moon) there is no disc at all then, only the dial.
+ * - **The glucose scale in mmol/L or mg/dL**: the ticks and numbers of the scale are a picture of their
+ *   own ([SCALE_VIEW]) that follows the units the phone sends (`key_units`). The hand is the same.
+ *
+ * Each design comes in two zips: the animated one for the AAPS fork, and a copy for plain AAPS 4.0
+ * ([animated] false, `*_AAPS4.zip`): no wake-up animation, no sun, moon or weather, no watch battery.
  *
  * All type is Bodoni Moda, a Didone like the big date of the Lange 1: the texts in the bold cut that
  * the zip brings ([FONT]), so the watch draws the same letters as the previews; the printing on the
@@ -113,11 +135,37 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
 
     data class Look(val name: String, val instant: Long, val weather: String?)
 
+    /**
+     * True for the zip of the AAPS fork: the wake-up animation, the sun and the moon, the weather and
+     * the watch battery. False for the copy that plain AAPS 4.0 can show.
+     */
+    protected open val animated: Boolean = true
+
+    /** The watch settings a render uses: IOB and COB in the disc, detailed IOB, and the units of the phone. */
+    data class Options(
+        val iob: Boolean = false, val cob: Boolean = false, val detailedIob: Boolean = false, val mgdl: Boolean = false, val complication: Boolean = false
+    )
+
+    /** The settings of the preview in the zip: the animated design shows its sky, the plain one the IOB and the COB. */
+    protected open val previewOptions: Options get() = if (animated) Options() else Options(iob = true, cob = true)
+
     private val fontFile = File("cwf-designs/fonts/$FONT.ttf")
     private val printFile = File("cwf-designs/fonts/$PRINT_FONT.ttf")
 
     /** The zip brings its own font, so the watch draws the same letters as these previews and as the printing on the dial. */
     override fun fonts(): Map<String, ByteArray> = mapOf(FONT to fontFile.readBytes())
+
+    /** The licence of the font goes with it. */
+    override fun otherFiles(): Map<String, ByteArray> = mapOf(FONT_LICENCE to File("cwf-designs/fonts/$FONT_LICENCE").readBytes())
+
+    /** Sets [options] as the watch settings of [face]. */
+    protected fun applyOptions(face: CustomWatchface, options: Options) {
+        face.sp.putBoolean(R.string.key_show_iob, options.iob)
+        face.sp.putBoolean(R.string.key_show_cob, options.cob)
+        face.sp.putBoolean(R.string.key_show_detailed_iob, options.detailedIob)
+        face.sp.putBoolean(R.string.key_units_mgdl, options.mgdl)
+        face.sp.putBoolean(R.string.key_show_complication_1, options.complication)
+    }
 
     override fun valueTypeface(): Typeface = serif()
 
@@ -143,9 +191,9 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
             .put("textsize", size).put("gravity", gravity).put("fontColor", color).put("font", FONT).put("fontStyle", "normal")
     }
 
-    /** A view that only shows a picture (no text), placed as a square of [size] around [x], [y]. */
+    /** A view that only shows a picture (no text: transparent, also when the watch writes into it, like the patient name), placed as a square of [size] around [x], [y]. */
     private fun JSONObject.picture(key: String, x: Float, y: Float, size: Int, picture: String): JSONObject =
-        place(key, (x - size / 2f).toInt(), (y - size / 2f).toInt(), size).put("textvalue", "").put("background", picture)
+        place(key, (x - size / 2f).toInt(), (y - size / 2f).toInt(), size).put("textvalue", "").put("fontColor", CLEAR).put("background", picture)
 
     override fun design(default: CwfData): JSONObject = JSONObject(default.json).apply {
         val p = palette
@@ -153,19 +201,17 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
             .put(CwfMetadataKey.CWF_NAME.key, displayName)
             .put(CwfMetadataKey.CWF_FILENAME.key, fileName)
             .put(CwfMetadataKey.CWF_AUTHOR.key, "AAPS (local)")
-            .put(CwfMetadataKey.CWF_CREATED_AT.key, "13/11/26")
-            .put(CwfMetadataKey.CWF_COMMENT.key, "A dress watch: glucose scale and window, sun and moon over a horizon, date, steps and two power reserves. No graph, no seconds")
-            .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION1.key, "false")
+            .put(CwfMetadataKey.CWF_CREATED_AT.key, if (animated) "13/11/26" else "18/11/26")
+            .put(CwfMetadataKey.CWF_COMMENT.key, if (animated) COMMENT else STOCK_COMMENT)
+            // Only settings that change something on this face. The steps slot and the date are on.
             .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION2.key, "true")
-            .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION3.key, "false")
-            .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION4.key, "false")
-            .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION5.key, "false")
             .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_DATE.key, "true")
             // The two battery hands are the delta views: they only show when these are on
             .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_DELTA.key, "true")
             .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_AVG_DELTA.key, "true")
-            .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_UPLOADER_BATTERY.key, "false")
-            .put(CwfMetadataKey.CWF_PREF_WATCH_SHOW_RIG_BATTERY.key, "false")
+        // Complication 1 (the disc), Show IOB and Show COB are left out on purpose: the wearer chooses
+        // them, and with "authorization" on, the watch would set them back to what the zip says each time.
+        // The other slots and the batteries of the uploader and the rig are not on this face at all.
 
         // No seconds: the watch draws once a minute
         put("enableSecond", false)
@@ -174,15 +220,16 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         // Every view this design does not use is off
         val used = setOf(
             "background", "cover_chart", "cover_plate", "hour_hand", "minute_hand", "sgv", "direction", "timestamp", "loop",
-            "day_name", "day", STEPS_VIEW, SUN_VIEW, MOON_VIEW, SUN_CLOUD_VIEW, MOON_CLOUD_VIEW, BG_HAND_VIEW, WATCH_HAND_VIEW, PHONE_HAND_VIEW
-        )
+            "day_name", "day", STEPS_VIEW, DISC_SLOT, BG_HAND_VIEW, PHONE_HAND_VIEW, IOB_VIEW, COB_VIEW, SCALE_VIEW
+        ) + if (animated) setOf(SUN_VIEW, MOON_VIEW, SUN_CLOUD_VIEW, MOON_CLOUD_VIEW, WATCH_HAND_VIEW) else emptySet()
         keys().asSequence().toList().forEach { key ->
             val view = optJSONObject(key) ?: return@forEach
             if (view.has("visibility") && key !in used) view.put("visibility", "gone")
         }
 
         put("background", JSONObject().put("width", 400).put("height", 400).put("topmargin", 0).put("leftmargin", 0).put("visibility", "visible"))
-        place("cover_plate", 0, 0, 400)
+        // Without land in the disc while it shows IOB or COB: the land lies over the texts
+        place("cover_plate", 0, 0, 400).put("dynPref", DISC_PLATE)
         place("hour_hand", 0, 0, 400)
         place("minute_hand", 0, 0, 400)
 
@@ -193,6 +240,10 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         text("loop", LOOP_BOX, ALARM_SIZE, "center", p.alarm)
             .put("textvalue", "LOOP %.0f'").put("dynValue", false).put("dynData", LOOP_DYN)
 
+        // The ticks and the numbers of the glucose scale, in the units of the phone
+        place(SCALE_VIEW, SCALE_BOX.left.toInt(), SCALE_BOX.top.toInt(), SCALE_BOX.width().toInt(), SCALE_BOX.height().toInt())
+            .put("fontColor", CLEAR).put("background", SCALE_MMOL).put("dynPref", UNITS)
+
         // The date window at 3 o'clock
         text("day_name", DAY_NAME_BOX, DATE_SIZE, "center", p.ink).put("allCaps", true)
         text("day", DAY_BOX, DATE_SIZE, "center", p.ink)
@@ -202,24 +253,38 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
             .put("color", CLEAR).put("borderRadius", 0).put("ringPrimaryColor", CLEAR).put("ringSecondaryColor", CLEAR)
             .put("fontColor", p.ink).put("iconColor", p.ink).put("textsize", STEPS_SIZE).put("font", FONT).put("fontStyle", "normal").put("gravity", "center")
 
-        // The sky disc: the sky behind, the sun and the moon on their round, a cloud over each in that weather
-        place("cover_chart", (SKY_X - SKY_R).toInt(), (SKY_Y - SKY_R).toInt(), (2 * SKY_R).toInt()).put("visibility", "visible")
-        for ((view, key, size, picture) in listOf(
-            Quad(SUN_VIEW, JsonKeyValues.SUN_CYCLE.key, BODY_SIZE, SUN),
-            Quad(SUN_CLOUD_VIEW, JsonKeyValues.SUN_CYCLE.key, CLOUD_SIZE, CLOUD),
-            Quad(MOON_CLOUD_VIEW, JsonKeyValues.MOON_CYCLE.key, CLOUD_SIZE, CLOUD)
-        )) {
-            val top = skyOrbit(key).point(0.25)
-            picture(view, top.first, top.second, size, picture).put("orbit", skyOrbitJson(key))
+        // The sky disc: the sky behind, or a window while it shows IOB or COB
+        place("cover_chart", (SKY_X - SKY_R).toInt(), (SKY_Y - SKY_R).toInt(), (2 * SKY_R).toInt()).put("visibility", "visible").put("dynPref", DISC_CHART)
+        // Complication 1 fills the disc: a round window behind it, a ring along the disc for a value with a range.
+        // The watch draws it under all views, so while it shows, the disc views above it are see-through.
+        place(DISC_SLOT, (SKY_X - SKY_R).toInt(), (SKY_Y - SKY_R).toInt(), (2 * SKY_R).toInt())
+            .put("color", p.window).put("borderRadius", SKY_R.toInt()).put("ringWidth", DISC_RING)
+            .put("ringPrimaryColor", p.hand).put("ringSecondaryColor", p.dialRing)
+            .put("fontColor", p.ink).put("iconColor", p.ink).put("textsize", DISC_SIZE).put("font", FONT).put("fontStyle", "normal").put("gravity", "center")
+        // IOB above COB; when one of them is off, the other moves to the middle of the disc. Gone under a complication.
+        text(IOB_VIEW, discLine(-DISC_LINE_GAP / 2f), DISC_SIZE, "center", p.ink)
+            .put("twinView", COB_VIEW).put("topOffsetTwinHidden", (DISC_LINE_GAP / 2f).toInt()).put("dynPref", IOB_TEXT)
+        text(COB_VIEW, discLine(DISC_LINE_GAP / 2f), DISC_SIZE, "center", p.ink)
+            .put("twinView", IOB_VIEW).put("topOffsetTwinHidden", -(DISC_LINE_GAP / 2f).toInt()).put("dynPref", COB_TEXT)
+        if (animated) {
+            // The sun and the moon on their round, a cloud over each in that weather; all see-through while the disc shows IOB or COB
+            for ((view, key, size, picture) in listOf(
+                Quad(SUN_VIEW, JsonKeyValues.SUN_CYCLE.key, BODY_SIZE, SUN),
+                Quad(SUN_CLOUD_VIEW, JsonKeyValues.SUN_CYCLE.key, CLOUD_SIZE, CLOUD),
+                Quad(MOON_CLOUD_VIEW, JsonKeyValues.MOON_CYCLE.key, CLOUD_SIZE, CLOUD)
+            )) {
+                val top = skyOrbit(key).point(0.25)
+                picture(view, top.first, top.second, size, picture).put("orbit", skyOrbitJson(key)).put("dynPref", DISC_HIDE)
+            }
+            // The moon is drawn by the watch from its photo, lit and turned as it is in the sky now (see MoonPicture)
+            val moonTop = skyOrbit(JsonKeyValues.MOON_CYCLE.key).point(0.25)
+            place(MOON_VIEW, (moonTop.first - MOON_DISC / 2f).toInt(), (moonTop.second - MOON_DISC / 2f).toInt(), MOON_DISC)
+                .put("textvalue", "").put(LegacyDesign.MOON_LIGHT_KEY, true).put("orbit", skyOrbitJson(JsonKeyValues.MOON_CYCLE.key)).put("dynPref", DISC_HIDE)
         }
-        // The moon is drawn by the watch from its photo, lit and turned as it is in the sky now (see MoonPicture)
-        val moonTop = skyOrbit(JsonKeyValues.MOON_CYCLE.key).point(0.25)
-        place(MOON_VIEW, (moonTop.first - MOON_DISC / 2f).toInt(), (moonTop.second - MOON_DISC / 2f).toInt(), MOON_DISC)
-            .put("textvalue", "").put(LegacyDesign.MOON_LIGHT_KEY, true).put("orbit", skyOrbitJson(JsonKeyValues.MOON_CYCLE.key))
 
-        // The glucose hand on its scale, and the two battery hands: pictures that the watch turns with the value
+        // The glucose hand on its scale, and the battery hands: pictures that the watch turns with the value
         picture(BG_HAND_VIEW, FAN_X, FAN_Y, BG_HAND_BOX, BG_HAND).put("rotationOffset", true).put("dynData", BG_HAND_DYN)
-        picture(WATCH_HAND_VIEW, WATCH_X, BATT_Y, BATT_HAND_BOX, BATT_HAND).put("rotationOffset", true).put("dynData", WATCH_HAND_DYN)
+        if (animated) picture(WATCH_HAND_VIEW, WATCH_X, BATT_Y, BATT_HAND_BOX, BATT_HAND).put("rotationOffset", true).put("dynData", WATCH_HAND_DYN)
         picture(PHONE_HAND_VIEW, PHONE_X, BATT_Y, BATT_HAND_BOX, BATT_HAND).put("rotationOffset", true).put("dynData", PHONE_HAND_DYN)
 
         (optJSONObject("dynData") ?: JSONObject().also { put("dynData", it) })
@@ -229,24 +294,71 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
                     .put("textvalue1", "LOOP %.0f'").put("invalidTextvalue", "LOOP --")
             )
             .put(BG_HAND_DYN, bgHandDynData())
-            .put(WATCH_HAND_DYN, batteryHandDynData(WatchBatteryLevel.KEY))
             .put(PHONE_HAND_DYN, batteryHandDynData(PHONE_VALUE_KEY))
+            .apply { if (animated) put(WATCH_HAND_DYN, batteryHandDynData(WatchBatteryLevel.KEY)) }
 
-        // A low battery blinks for a few seconds after the wrist is raised; nothing else moves
-        put(
-            "animation", JSONObject().put("durationMs", ANIMATION_MS).put("fps", 24).put("fadeMs", 600).put(
-                "blink", JSONArray()
-                    .put(JSONObject().put("views", JSONArray().put(WATCH_HAND_VIEW)).put("valueKey", WatchBatteryLevel.KEY).put("atOrBelow", BATT_LOW))
-                    .put(JSONObject().put("views", JSONArray().put(PHONE_HAND_VIEW)).put("valueKey", PHONE_VALUE_KEY).put("atOrBelow", BATT_LOW))
+        // What the settings of the watch change: the disc, and the units of the scale. In the disc a
+        // complication wins over IOB and COB, and they win over the sky.
+        put("dynPref", JSONObject().apply {
+            val window = picture(SUB_DIAL)
+            val open = picture(COVER_PLATE_OPEN)
+            val clear = always(JSONObject().put("color1", CLEAR).put("invalidColor", CLEAR))
+            val noText = always(JSONObject().put("fontColor1", CLEAR).put("invalidFontColor", CLEAR))
+            prefChain(DISC_CHART, listOf(COMPLICATION_PREF to picture(BLANK), IOB_PREF to window, COB_PREF to window))
+            prefChain(DISC_PLATE, listOf(COMPLICATION_PREF to open, IOB_PREF to open, COB_PREF to open))
+            if (animated) prefChain(DISC_HIDE, listOf(COMPLICATION_PREF to clear, IOB_PREF to clear, COB_PREF to clear))
+            // Detailed IOB, "(0.90|0.35)", is longer: smaller, so it fits the disc
+            prefChain(IOB_TEXT, listOf(COMPLICATION_PREF to noText, DETAIL_PREF to always(JSONObject().put("textsize1", DETAIL_SIZE).put("invalidTextSize", DETAIL_SIZE))))
+            prefChain(COB_TEXT, listOf(COMPLICATION_PREF to noText))
+            put(
+                UNITS, JSONObject().put("prefKey", JsonKeyValues.PREF_UNITS.key)
+                    .put("true", always(JSONObject().put("image1", SCALE_MGDL).put("invalidImage", SCALE_MGDL)))
+                    .put("false", always(JSONObject().put("image1", SCALE_MMOL).put("invalidImage", SCALE_MMOL)))
             )
-        )
-
-        // The weather: a cloud over the sun and the moon, a grey sky when it is cloudy or rains
-        put(LegacyDesign.WEATHER_LOOKS_KEY, JSONObject().apply {
-            put(EventData.Weather.PARTLY, JSONObject().put(LegacyDesign.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_PARTLY)))
-            put(EventData.Weather.CLOUDY, JSONObject().put(LegacyDesign.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_CLOUDY).put(ResFileMap.COVER_CHART.fileName, SKY_CLOUDY)))
-            put(EventData.Weather.RAIN, JSONObject().put(LegacyDesign.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_RAIN).put(ResFileMap.COVER_CHART.fileName, SKY_RAIN)))
         })
+
+        if (animated) {
+            // A low battery blinks for a few seconds after the wrist is raised; nothing else moves
+            put(
+                "animation", JSONObject().put("durationMs", ANIMATION_MS).put("fps", 24).put("fadeMs", 600).put(
+                    "blink", JSONArray()
+                        .put(JSONObject().put("views", JSONArray().put(WATCH_HAND_VIEW)).put("valueKey", WatchBatteryLevel.KEY).put("atOrBelow", BATT_LOW))
+                        .put(JSONObject().put("views", JSONArray().put(PHONE_HAND_VIEW)).put("valueKey", PHONE_VALUE_KEY).put("atOrBelow", BATT_LOW))
+                )
+            )
+
+            // The weather: a cloud over the sun and the moon, a grey sky when it is cloudy or rains
+            put(LegacyDesign.WEATHER_LOOKS_KEY, JSONObject().apply {
+                put(EventData.Weather.PARTLY, JSONObject().put(LegacyDesign.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_PARTLY)))
+                put(EventData.Weather.CLOUDY, JSONObject().put(LegacyDesign.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_CLOUDY).put(ResFileMap.COVER_CHART.fileName, SKY_CLOUDY)))
+                put(EventData.Weather.RAIN, JSONObject().put(LegacyDesign.IMAGES_KEY, JSONObject().put(CLOUD, CLOUD_RAIN).put(ResFileMap.COVER_CHART.fileName, SKY_RAIN)))
+            })
+        }
+    }
+
+    /** One line of text in the disc, its middle [dy] below the middle of the disc. As wide as the disc. */
+    private fun discLine(dy: Float): RectF = RectF(SKY_X - DISC_TEXT_WIDTH / 2f, SKY_Y + dy - DISC_LINE_HEIGHT / 2f, SKY_X + DISC_TEXT_WIDTH / 2f, SKY_Y + dy + DISC_LINE_HEIGHT / 2f)
+
+    /**
+     * [answer] whatever the value: a dynData on the day of the month, which always has a value and
+     * always gives step 1. Also the "invalid" step, to be safe.
+     */
+    private fun always(answer: JSONObject): JSONObject = answer.put("valueKey", "day").put("minData", 0).put("maxData", 32)
+
+    /** A dynPref answer: the picture [name], whatever the value. */
+    private fun picture(name: String): JSONObject = always(JSONObject().put("image1", name).put("invalidImage", name))
+
+    /**
+     * dynPref blocks that ask the settings of [steps] in turn: the first one that is on gives its
+     * answer; when none is on there is no answer, so the view keeps its own look. Block [name] asks the
+     * first, `<name>2` the second and so on; plain AAPS goes from one to the next with the `dynPref` key.
+     */
+    private fun JSONObject.prefChain(name: String, steps: List<Pair<String, JSONObject>>) {
+        steps.forEachIndexed { i, (prefKey, answer) ->
+            val block = JSONObject().put("prefKey", prefKey).put("true", JSONObject(answer.toString()))
+            if (i < steps.lastIndex) block.put("false", JSONObject().put("dynPref", "$name${i + 2}"))
+            put(if (i == 0) name else "$name${i + 1}", block)
+        }
     }
 
     private data class Quad(val view: String, val key: String, val size: Int, val picture: String)
@@ -285,21 +397,27 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
 
     override fun images(): Map<String, ByteArray> = mapOf(
         ResFileMap.BACKGROUND.fileName to dial(),
-        ResFileMap.COVER_PLATE.fileName to coverPlate(),
-        ResFileMap.COVER_CHART.fileName to sky(palette.skyTop, palette.skyLow, palette.stars),
-        SKY_CLOUDY to sky(palette.skyCloudy, palette.skyCloudy, false),
-        SKY_RAIN to sky(palette.skyRain, palette.skyRain, false),
+        // Plain AAPS has no sun and moon: with IOB and COB off there is no disc, no frame and no sky
+        ResFileMap.COVER_PLATE.fileName to coverPlate(land = animated, frame = animated),
+        COVER_PLATE_OPEN to coverPlate(land = false, frame = true),
+        ResFileMap.COVER_CHART.fileName to if (animated) sky(palette.skyTop, palette.skyLow, palette.stars) else blankPng(),
+        SUB_DIAL to subDial(),
+        SCALE_MMOL to scalePicture(mgdl = false),
+        SCALE_MGDL to scalePicture(mgdl = true),
         ResFileMap.HOUR_HAND.fileName to breguetHand(HOUR_LENGTH, 7.5f),
         ResFileMap.MINUTE_HAND.fileName to breguetHand(MINUTE_LENGTH, 5.5f),
         BG_HAND to gaugeHand(BG_HAND_BOX, BG_HAND_LENGTH, 2f, palette.hand),
         BATT_HAND to gaugeHand(BATT_HAND_BOX, BATT_HAND_LENGTH, 1.8f, "#FFFFFF"),
+        BLANK to blankPng()
+    ) + arrowImages() + if (!animated) emptyMap() else mapOf(
+        SKY_CLOUDY to sky(palette.skyCloudy, palette.skyCloudy, false),
+        SKY_RAIN to sky(palette.skyRain, palette.skyRain, false),
         SUN to sunPicture(),
         CLOUD to blankPng(),
         CLOUD_PARTLY to cloudPicture(CloudKind.PARTLY),
         CLOUD_CLOUDY to cloudPicture(CloudKind.CLOUDY),
-        CLOUD_RAIN to cloudPicture(CloudKind.RAIN),
-        BLANK to blankPng()
-    ) + arrowImages()
+        CLOUD_RAIN to cloudPicture(CloudKind.RAIN)
+    )
 
     private fun color(hex: String) = Color.parseColor(hex)
     private fun paint(hex: String, style: Paint.Style = Paint.Style.FILL, width: Float = 0f) =
@@ -328,7 +446,8 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
 
     /**
      * The dial, 800 x 800, as jpg: the gold rim, the guilloché, the minute track, the numerals, the
-     * glucose scale, the battery scales and the windows. All that does not move.
+     * band of the glucose scale, the battery scales and the windows. All that does not move and does
+     * not change with a setting (the ticks and numbers of the glucose scale: [scalePicture]).
      */
     private fun dial(): ByteArray {
         val p = palette
@@ -367,8 +486,9 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
             val (x, y) = polar(200f, 200f, NUMERAL_R, hour * 30f)
             canvas.label(text, x, y, NUMERAL_SIZE, p.ink)
         }
-        glucoseScale(canvas)
-        batteryScale(canvas, WATCH_X, BatteryKind.WATCH)
+        glucoseBand(canvas)
+        // Plain AAPS does not know the battery of the watch
+        if (animated) batteryScale(canvas, WATCH_X, BatteryKind.WATCH)
         batteryScale(canvas, PHONE_X, BatteryKind.PHONE)
         // The windows
         canvas.window(BG_WINDOW)
@@ -377,26 +497,43 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         return ByteArrayOutputStream().also { image.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, it) }.toByteArray()
     }
 
-    /** The glucose scale: a thin arc, the band in three colours, ticks at 1 mmol/L and the numbers 4, 7, 10 and 15. */
-    private fun glucoseScale(canvas: Canvas) {
+    /** The glucose scale on the dial: a thin arc and the band in three colours, the same in both units. */
+    private fun glucoseBand(canvas: Canvas) {
         val p = palette
-        val s = SCALE
         canvas.arc(FAN_X, FAN_Y, FAN_R, FAN_MIN_ANGLE, FAN_MAX_ANGLE, paint(p.ink, Paint.Style.STROKE, 1.2f))
         for ((from, to, hex) in listOf(Triple(BG_MIN, BG_LOW, p.bandLow), Triple(BG_LOW, BG_HIGH, p.bandMid), Triple(BG_HIGH, BG_MAX, p.bandHigh)))
             canvas.arc(FAN_X, FAN_Y, BAND_R, bgAngle(from), bgAngle(to), paint(hex, Paint.Style.STROKE, BAND_WIDTH).apply { strokeCap = Paint.Cap.BUTT })
-        var mmol = 3.0
-        while (mmol * MGDL_PER_MMOL <= BG_MAX) {
-            val angle = bgAngle(mmol * MGDL_PER_MMOL)
-            val major = mmol in LABELS
+    }
+
+    /** The ticks of the glucose scale in mg/dL, and which of them have a number: in mmol/L or in mg/dL. */
+    protected fun scaleTicks(mgdl: Boolean): List<Pair<Double, Boolean>> =
+        if (mgdl) generateSequence(BG_MIN) { it + MGDL_TICK }.takeWhile { it <= BG_MAX }.map { it to (it in MGDL_LABELS) }.toList()
+        else generateSequence(3.0) { it + 1.0 }.takeWhile { it * MGDL_PER_MMOL <= BG_MAX }.map { it * MGDL_PER_MMOL to (it in LABELS) }.toList()
+
+    /** The text of the number at [value] mg/dL. */
+    private fun scaleLabel(value: Double, mgdl: Boolean): String = if (mgdl) value.toInt().toString() else (value / MGDL_PER_MMOL).toInt().toString()
+
+    /**
+     * The ticks and the numbers of the glucose scale, over [SCALE_BOX] at 2 x: at 1 mmol/L with the numbers
+     * 4, 7, 10 and 15, or at 10 mg/dL with the numbers of [MGDL_LABELS]. Transparent around them.
+     */
+    private fun scalePicture(mgdl: Boolean): ByteArray {
+        val p = palette
+        val s = SCALE
+        val image = createBitmap((SCALE_BOX.width() * s).toInt(), (SCALE_BOX.height() * s).toInt()).apply { eraseColor(Color.TRANSPARENT) }
+        val canvas = Canvas(image)
+        canvas.translate(-SCALE_BOX.left * s, -SCALE_BOX.top * s)
+        for ((value, major) in scaleTicks(mgdl)) {
+            val angle = bgAngle(value)
             val (x1, y1) = polar(FAN_X, FAN_Y, FAN_R, angle)
             val (x2, y2) = polar(FAN_X, FAN_Y, FAN_R + if (major) 8f else 4f, angle)
             canvas.drawLine(x1 * s, y1 * s, x2 * s, y2 * s, paint(p.ink, width = if (major) 2f else 1f))
             if (major) {
                 val (x, y) = polar(FAN_X, FAN_Y, FAN_LABEL_R, angle)
-                canvas.label(mmol.toInt().toString(), x, y, FAN_LABEL_SIZE, p.ink)
+                canvas.label(scaleLabel(value, mgdl), x, y, FAN_LABEL_SIZE, p.ink)
             }
-            mmol += 1.0
         }
+        return pngBytes(image)
     }
 
     private enum class BatteryKind { WATCH, PHONE }
@@ -431,11 +568,12 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
     }
 
     /**
-     * The cover plate, above all values: the land of the sky disc, a little see-through (so the sun and
-     * the moon show darker below the horizon), the frame of the disc, and the caps over the pivots of the
-     * small hands.
+     * The cover plate, above all values: the land of the sky disc (with [land]), a little see-through (so
+     * the sun and the moon show darker below the horizon), the frame of the disc, and the caps over the
+     * pivots of the small hands. Without [land] while the disc shows IOB or COB, without the [frame] too
+     * when there is no disc.
      */
-    private fun coverPlate(): ByteArray {
+    private fun coverPlate(land: Boolean, frame: Boolean): ByteArray {
         val p = palette
         val s = SCALE
         val image = createBitmap(800, 800).apply { eraseColor(Color.TRANSPARENT) }
@@ -458,13 +596,15 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
             }
             canvas.drawPath(path, paint(hex))
         }
-        hills(HORIZON_Y - 1f, 2.5f, 1.4f, 0.1f, p.landFar)
-        hills(HORIZON_Y + 1.5f, 1.5f, 0.9f, 0.6f, p.land)
+        if (land) {
+            hills(HORIZON_Y - 1f, 2.5f, 1.4f, 0.1f, p.landFar)
+            hills(HORIZON_Y + 1.5f, 1.5f, 0.9f, 0.6f, p.land)
+        }
         canvas.restore()
         // The frame of the disc
-        canvas.drawCircle(SKY_X * s, SKY_Y * s, SKY_R * s, paint(p.gold, Paint.Style.STROKE, 3f))
+        if (frame) canvas.drawCircle(SKY_X * s, SKY_Y * s, SKY_R * s, paint(p.gold, Paint.Style.STROKE, 3f))
         // Caps on the pivots of the glucose and battery hands
-        for ((x, y) in listOf(FAN_X to FAN_Y, WATCH_X to BATT_Y, PHONE_X to BATT_Y)) {
+        for ((x, y) in listOfNotNull(FAN_X to FAN_Y, if (animated) WATCH_X to BATT_Y else null, PHONE_X to BATT_Y)) {
             canvas.drawCircle(x * s, y * s, 4.5f * s, paint(p.gold))
             canvas.drawCircle(x * s, y * s, 4.5f * s, paint(shade(p.gold, 0.3f), Paint.Style.STROKE, 0.8f))
         }
@@ -485,6 +625,21 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
             for ((x, y, r) in listOf(Triple(0.30f, 0.22f, 1.1f), Triple(0.62f, 0.16f, 0.9f), Triple(0.78f, 0.34f, 1.2f), Triple(0.18f, 0.42f, 0.8f), Triple(0.48f, 0.30f, 0.7f), Triple(0.86f, 0.50f, 0.8f), Triple(0.40f, 0.10f, 0.8f)))
                 canvas.drawCircle(x * size, y * size, r * SCALE, star)
         }
+        return pngBytes(image)
+    }
+
+    /** The disc while it shows IOB or COB: a window like the others, with the same shadow along the top. 2 x the disc. */
+    private fun subDial(): ByteArray {
+        val size = (2 * SKY_R * SCALE).toInt()
+        val image = createBitmap(size, size).apply { eraseColor(Color.TRANSPARENT) }
+        val canvas = Canvas(image)
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint(palette.window))
+        canvas.save()
+        canvas.clipPath(Path().apply { addCircle(size / 2f, size / 2f, size / 2f, Path.Direction.CW) })
+        canvas.drawCircle(size / 2f, size / 2f + 3f * SCALE, size / 2f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = 6f * SCALE; color = Color.argb(40, 0, 0, 0)
+        })
+        canvas.restore()
         return pngBytes(image)
     }
 
@@ -642,15 +797,20 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
     // Rendering helpers of the tests
     // ------------------------------------------------------------------------------------------
 
-    private fun render(instant: Long, weather: String? = null, sample: Sample = Sample(), bgAgeMin: Long = 2, loopAgeMin: Long = 3, watch: Int? = WATCH_SAMPLE, phone: String = PHONE_SAMPLE): Bitmap {
+    private fun render(
+        instant: Long, weather: String? = null, sample: Sample = Sample(), bgAgeMin: Long = 2, loopAgeMin: Long = 3, watch: Int? = WATCH_SAMPLE, phone: String = PHONE_SAMPLE,
+        options: Options = Options()
+    ): Bitmap {
         val default = defaultDesign()
         val design = design(default)
-        val face = storedFace(design, default, images(), instant, weather, watch)
+        val face = storedFace(design, default, images(), instant, weather, watch) { applyOptions(it, options) }
         storeSampleData(face, sample, bgAgeMin, loopAgeMin, phone)
         Thread.sleep(600)   // past the render data share window
         face.refreshRenderData()
         val picture = face.renderToBitmap(400, 400)
         drawComplicationValues(Canvas(picture), lookOf(design, weather))
+        // The watch draws the slots under the views: here they come after, which is the same where the views are see-through
+        if (options.complication) drawSlot(Canvas(picture), design.getJSONObject(DISC_SLOT), health(HealthKind.HEART_RATE, HEART_SAMPLE, ComplicationType.SHORT_TEXT))
         return picture
     }
 
@@ -675,13 +835,17 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         val design = design(default)
         val json = design.toString(4)
         val images = images()
-        val previewImage = preview(design, default, images, previewInstant)
-        val jpg = ByteArrayOutputStream().also { previewImage.compress(Bitmap.CompressFormat.JPEG, 88, it) }.toByteArray()
-        val zip = zip(json, jpg, images)
+        val previewImage = preview(design, default, images, previewInstant) { applyOptions(it, previewOptions) }
+        val jpg = ByteArrayOutputStream().also { previewImage.compress(Bitmap.CompressFormat.JPEG, PREVIEW_QUALITY, it) }.toByteArray()
+        // The json without spaces: the phone sends the files unpacked, and every kilobyte counts (see MAX_UNPACKED_BYTES)
+        val zip = zip(design.toString(), jpg, images)
         File(out, "$fileName.zip").writeBytes(zip)
         File(out, "$fileName.png").writeBytes(pngBytes(previewImage))
         println("$fileName.zip: ${zip.size} bytes")
         assertThat(zip.size).isAtMost(MAX_ZIP_BYTES)
+        val unpacked = ZipInputStream(zip.inputStream()).use { input -> generateSequence { input.nextEntry }.sumOf { input.readBytes().size } }
+        println("$fileName unpacked: $unpacked bytes")
+        assertWithMessage("unpacked").that(unpacked).isAtMost(MAX_UNPACKED_BYTES)
         // No picture ends with "Day": the watch would show it in the place of another one
         for (name in images.keys) assertWithMessage(name).that(name.endsWith(LegacyDesign.DAY_SUFFIX)).isFalse()
 
@@ -691,16 +855,23 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         assertThat(metadata[CwfMetadataKey.CWF_NAME]).isEqualTo(displayName)
         assertThat(metadata[CwfMetadataKey.CWF_FILENAME]).isEqualTo(fileName)
         assertThat(metadata[CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION2]).isEqualTo("true")
-        for (key in listOf(CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION1, CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION3, CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION4, CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION5))
-            assertWithMessage("$key").that(metadata[key]).isEqualTo("false")
+        // No setting that changes nothing here, and none the wearer chooses: the phone lists them all
+        assertThat(metadata.keys.filter { it.isPref }).containsExactly(
+            CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION2, CwfMetadataKey.CWF_PREF_WATCH_SHOW_DATE,
+            CwfMetadataKey.CWF_PREF_WATCH_SHOW_DELTA, CwfMetadataKey.CWF_PREF_WATCH_SHOW_AVG_DELTA
+        )
         for (key in listOf(CwfMetadataKey.CWF_PREF_WATCH_SHOW_DELTA, CwfMetadataKey.CWF_PREF_WATCH_SHOW_AVG_DELTA, CwfMetadataKey.CWF_PREF_WATCH_SHOW_DATE))
             assertWithMessage("$key").that(metadata[key]).isEqualTo("true")
         // The font is in the zip, and every text uses it
         assertThat(loaded.cwfData.resData[FONT]?.format).isEqualTo(ResFormat.TTF)
         for (key in listOf("sgv", "timestamp", "loop", "day_name", "day", STEPS_VIEW)) assertWithMessage(key).that(design.getJSONObject(key).getString("font")).isEqualTo(FONT)
-        // Every picture a view, a dynData or a weather look names is in the zip
+        // Every picture a view, a dynData, a dynPref or a weather look names is in the zip
         assertThat(loaded.cwfData.resData.keys).containsAtLeastElementsIn(images.keys)
-        design.getJSONObject(LegacyDesign.WEATHER_LOOKS_KEY).let { weatherLooks ->
+        val named = Regex("\"(?:image\\d+|invalidImage|background)\":\"([^\"]+)\"").findAll(design.toString()).map { it.groupValues[1] }.toSet()
+        assertThat(images.keys + fonts().keys).containsAtLeastElementsIn(named)
+        // The font licence goes with the font
+        assertThat(ZipInputStream(zip.inputStream()).use { input -> generateSequence { input.nextEntry }.map { it.name }.toList() }).contains(FONT_LICENCE)
+        if (animated) design.getJSONObject(LegacyDesign.WEATHER_LOOKS_KEY).let { weatherLooks ->
             weatherLooks.keys().forEach { weather ->
                 weatherLooks.getJSONObject(weather).getJSONObject(LegacyDesign.IMAGES_KEY).let { swaps ->
                     swaps.keys().forEach { assertWithMessage("$weather $it").that(images.keys).containsAtLeast(it, swaps.getString(it)) }
@@ -725,10 +896,12 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
                 assertWithMessage(key).that(hypot(x - 200f, y - 200f)).isAtMost(TRACK_INNER)
         }
         // The turning hands stay inside their own square, so the watch never cuts them
-        for ((key, length) in listOf(BG_HAND_VIEW to BG_HAND_LENGTH, WATCH_HAND_VIEW to BATT_HAND_LENGTH, PHONE_HAND_VIEW to BATT_HAND_LENGTH))
+        for ((key, length) in listOfNotNull(BG_HAND_VIEW to BG_HAND_LENGTH, if (animated) WATCH_HAND_VIEW to BATT_HAND_LENGTH else null, PHONE_HAND_VIEW to BATT_HAND_LENGTH))
             assertWithMessage(key).that(design.getJSONObject(key).getInt("width") / 2f).isAtLeast(length)
+        // The ticks and numbers of the scale are all in the picture of the scale
+        assertThat(SCALE_BOX.contains(scaleBox())).isTrue()
         // The sun, the moon and their clouds stay in the sky disc all around
-        for (key in listOf(SUN_VIEW, MOON_VIEW, SUN_CLOUD_VIEW, MOON_CLOUD_VIEW)) {
+        if (animated) for (key in listOf(SUN_VIEW, MOON_VIEW, SUN_CLOUD_VIEW, MOON_CLOUD_VIEW)) {
             val view = design.getJSONObject(key)
             val orbit = Orbit.read(view)!!
             val half = when (key) {
@@ -746,7 +919,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         // The sky disc is round: no window or scale reaches into it
         val boxes = mapOf(
             "glucose window" to BG_WINDOW, "date window" to DATE_WINDOW, "watch battery" to batteryBox(WATCH_X),
-            "glucose scale" to scaleBox()
+            "glucose scale" to SCALE_BOX
         )
         for ((name, r) in boxes) {
             val nearX = SKY_X.coerceIn(r.left, r.right)
@@ -882,6 +1055,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
 
     @Test
     fun theSunAndTheMoonShowDarkerBelowTheHorizon() {
+        assumeTrue(animated)
         val clock = DayNightClock(location = { null })
         // In the evening the sun is down and the moon high
         val evening = EVENING_MS
@@ -912,6 +1086,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
 
     @Test
     fun theWeatherPutsCloudsAndRainOnTheSunAndTheMoon() {
+        assumeTrue(animated)
         val clock = DayNightClock(location = { null })
         val sun = skyOrbit(JsonKeyValues.SUN_CYCLE.key).point(clock.sunCycle(AFTERNOON_MS))
         val pictures = listOf(null, EventData.Weather.PARTLY, EventData.Weather.CLOUDY, EventData.Weather.RAIN).associateWith { render(AFTERNOON_MS, it) }
@@ -953,13 +1128,19 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         for ((watch, phone) in listOf(66 to 78, 15 to 95, 90 to 10)) {
             val picture = render(previewInstant, watch = watch, phone = phone.toString())
             pictures += "watch $watch, phone $phone" to picture
-            for ((cx, level) in listOf(WATCH_X to watch, PHONE_X to phone)) {
+            for ((cx, level) in listOfNotNull(if (animated) WATCH_X to watch else null, PHONE_X to phone)) {
                 val tip = polar(cx, BATT_Y, BATT_HAND_LENGTH - 6f, batteryAngle(level.toDouble()))
                 val colour = if (level <= BATT_LOW) palette.alarm else palette.hand
                 assertWithMessage("hand at $level").that(countNear(picture, tip, 2, colour, 60)).isGreaterThan(0)
             }
         }
         sheet(pictures, "${fileName}_batteries.png")
+        if (!animated) {
+            // Plain AAPS has no watch battery: no hand, no scale for it
+            assertThat(design(defaultDesign()).getJSONObject(WATCH_HAND_VIEW).getString("visibility")).isEqualTo("gone")
+            storeSampleData(newFace())
+            return
+        }
         // A low battery blinks while the wake-up animation plays, and nothing else moves
         val design = design(defaultDesign())
         val spec = readAnimation(design)
@@ -972,6 +1153,175 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         assertThat(uses(design, "pulse")).isEmpty()
         assertThat(spec.normalized().withoutImage()).isEqualTo(spec.withoutImage())
         storeSampleData(newFace())
+    }
+
+    /** The pixels of [hex] in [box] of [picture]. */
+    private fun pixelsNear(picture: Bitmap, box: RectF, hex: String, tolerance: Int = 50): Int {
+        var n = 0
+        for (y in box.top.toInt() until box.bottom.toInt()) for (x in box.left.toInt() until box.right.toInt()) if (near(picture.getPixel(x, y), hex, tolerance)) n++
+        return n
+    }
+
+    /** The part of the disc a line of text in it covers, [dy] below its middle. */
+    private fun discRow(dy: Float) = RectF(SKY_X - 30f, SKY_Y + dy - 7f, SKY_X + 30f, SKY_Y + dy + 7f)
+
+    @Test
+    fun theDiscShowsWhatTheSettingsChoose() {
+        val instant = if (animated) AFTERNOON_MS else previewInstant
+        val cases = listOf(
+            (if (animated) "sky (IOB and COB off)" else "no disc (IOB and COB off)") to Options(), "IOB" to Options(iob = true), "COB" to Options(cob = true),
+            "IOB and COB" to Options(iob = true, cob = true), "detailed IOB and COB" to Options(iob = true, cob = true, detailedIob = true),
+            "complication (heart rate)" to Options(complication = true), "complication, IOB and COB on" to Options(iob = true, cob = true, complication = true)
+        )
+        val pictures = cases.map { (name, options) -> name to render(instant, options = options) }
+        sheet(pictures, "${fileName}_disc.png")
+        sheet(pictures.map { (name, picture) -> name to Bitmap.createBitmap(picture, 40, 134, 104, 104) }, "${fileName}_disc-zoom.png")
+        val (sky, iob, cob, both, detailed) = pictures.map { it.second }
+        val withSlot = pictures[5].second
+        val ink = palette.ink
+        val upper = discRow(-DISC_LINE_GAP / 2f)
+        val middle = discRow(0f)
+        val lower = discRow(DISC_LINE_GAP / 2f)
+        // Off: no text in the disc, and the sky (not the window) behind it
+        // (a star can have the colour of the ink: a few pixels, a text has many)
+        for (row in listOf(upper, middle, lower)) assertWithMessage("sky, text").that(pixelsNear(sky, row, ink, 20)).isAtMost(4)
+        val skyPoint = Pair(SKY_X - 26f, SKY_Y - 22f)
+        assertWithMessage("sky behind").that(near(around(sky, skyPoint, 0).single(), palette.window, 6)).isFalse()
+        val frame = Pair(SKY_X - SKY_R, SKY_Y)
+        if (!animated) {
+            // Plain AAPS: no disc at all, the dial shows through, also where the frame was
+            assertWithMessage("dial in the disc").that(near(around(sky, skyPoint, 0).single(), palette.dial, 20)).isTrue()
+            assertWithMessage("no frame").that(countNear(sky, frame, 1, palette.gold, 40)).isEqualTo(0)
+        }
+        // With a value the disc has its frame
+        assertWithMessage("frame").that(countNear(both, frame, 1, palette.gold, 40)).isGreaterThan(0)
+        // One of them: one line in the middle, on the window
+        for ((name, picture) in listOf("IOB" to iob, "COB" to cob)) {
+            assertWithMessage("$name in the middle").that(pixelsNear(picture, middle, ink)).isGreaterThan(15)
+            assertWithMessage("$name: window behind").that(near(around(picture, skyPoint, 0).single(), palette.window, 12)).isTrue()
+        }
+        // Both: a line above and a line below the middle
+        assertWithMessage("both, upper").that(pixelsNear(both, upper, ink)).isGreaterThan(15)
+        assertWithMessage("both, lower").that(pixelsNear(both, lower, ink)).isGreaterThan(15)
+        assertWithMessage("detailed IOB").that(pixelsNear(detailed, upper, ink)).isGreaterThan(15)
+        // No land over the texts: the window goes down to the bottom of the disc
+        val low = Pair(SKY_X, SKY_Y + SKY_R - 6f)
+        assertWithMessage("no land").that(near(around(both, low, 0).single(), palette.window, 12)).isTrue()
+        // A complication: its round window and its value fill the disc
+        assertWithMessage("complication window").that(near(around(withSlot, skyPoint, 0).single(), palette.window, 12)).isTrue()
+        assertWithMessage("complication value").that(pixelsNear(withSlot, middle, ink)).isGreaterThan(15)
+        // It wins over IOB and COB. A render-only face always takes the complication settings as off
+        // (CustomWatchface.prefBoolean), so this is checked on the dynPref chains, the way the watch reads them
+        val dynPref = design(defaultDesign()).getJSONObject("dynPref")
+        fun answer(block: String, vararg on: String) = resolveDynPref(dynPref, block, on.toSet())
+        for (on in listOf(arrayOf(COMPLICATION_PREF), arrayOf(COMPLICATION_PREF, IOB_PREF, COB_PREF, DETAIL_PREF))) {
+            assertThat(answer(DISC_CHART, *on)?.getString("image1")).isEqualTo(BLANK)
+            assertThat(answer(DISC_PLATE, *on)?.getString("image1")).isEqualTo(COVER_PLATE_OPEN)
+            assertThat(answer(IOB_TEXT, *on)?.getString("fontColor1")).isEqualTo(CLEAR)
+            assertThat(answer(COB_TEXT, *on)?.getString("fontColor1")).isEqualTo(CLEAR)
+            if (animated) assertThat(answer(DISC_HIDE, *on)?.getString("color1")).isEqualTo(CLEAR)
+        }
+        // Without it: IOB or COB give the window, detailed IOB a smaller text, nothing on gives no answer
+        assertThat(answer(DISC_CHART, COB_PREF)?.getString("image1")).isEqualTo(SUB_DIAL)
+        assertThat(answer(IOB_TEXT, IOB_PREF, DETAIL_PREF)?.getInt("textsize1")).isEqualTo(DETAIL_SIZE)
+        assertThat(answer(COB_TEXT, COB_PREF)).isNull()
+        assertThat(answer(DISC_CHART)).isNull()
+        if (animated) {
+            // The sun is in the sky of the afternoon, and gone while the disc shows a value
+            val sun = skyOrbit(JsonKeyValues.SUN_CYCLE.key).point(DayNightClock(location = { null }).sunCycle(AFTERNOON_MS))
+            assertWithMessage("sun in the sky").that(countNear(sky, sun, 4, "#FFC93A", 50)).isGreaterThan(20)
+            for ((name, picture) in listOf("IOB" to iob, "COB" to cob, "both" to both)) assertWithMessage("no sun with $name").that(countNear(picture, sun, 4, "#FFC93A", 50)).isEqualTo(0)
+        }
+        storeSampleData(newFace())
+    }
+
+    /**
+     * What a dynPref [block] gives with the settings [on] switched on (every other one off), followed
+     * from block to block as `CustomWatchface.buildDynPrefs` does; null when there is no answer.
+     */
+    private fun resolveDynPref(dynPref: JSONObject, block: String, on: Set<String>): JSONObject? {
+        var name = block
+        repeat(10) {
+            val json = dynPref.getJSONObject(name)
+            val next = json.optJSONObject((json.getString("prefKey") in on).toString()) ?: return null
+            name = next.optString("dynPref").takeIf { it.isNotEmpty() } ?: return next
+        }
+        error("dynPref $block does not end")
+    }
+
+    @Test
+    fun theDiscTextsFitTheDisc() {
+        // The middle of a line is DISC_LINE_GAP / 2 from the middle of the disc; its digits reach 0.4 of the text size above and below.
+        // The room is the width of the disc inside its frame at the far edge of the digits.
+        fun roomFor(size: Int): Float {
+            val reach = DISC_LINE_GAP / 2f + 0.4f * size
+            return 2f * sqrt((SKY_R - 3f) * (SKY_R - 3f) - reach * reach)
+        }
+        val room = roomFor(DISC_SIZE)
+        for (value in listOf("12.35", "-10.25", "0.00", "125g")) assertWithMessage(value).that(textWidth(value, DISC_SIZE)).isAtMost(room)
+        // COB with carbs still to come is longer: it may reach over the frame, but stays on one line in its view
+        assertWithMessage("45(30)g").that(textWidth("45(30)g", DISC_SIZE)).isAtMost(DISC_TEXT_WIDTH - 4f)
+        assertWithMessage("detailed").that(textWidth("(0.90|0.35)", DETAIL_SIZE)).isAtMost(roomFor(DETAIL_SIZE))
+        // With a negative or a big part it may reach over the frame, but stays on one line in its view
+        assertWithMessage("detailed, long").that(textWidth("(10.25|-0.35)", DETAIL_SIZE)).isAtMost(DISC_TEXT_WIDTH - 4f)
+        assertThat(DISC_SIZE).isAtLeast(MIN_TEXT)
+        assertThat(DISC_LINE_HEIGHT).isAtLeast(DISC_SIZE * 1.15f)
+    }
+
+    @Test
+    fun theScaleFollowsTheUnitsOfThePhone() {
+        val mmol = render(previewInstant)
+        val mgdl = render(previewInstant, sample = Sample(text = "120", mgdl = 120.0), options = Options(mgdl = true))
+        sheet(listOf("mmol/L" to mmol, "mg/dL" to mgdl).map { (name, picture) -> name to Bitmap.createBitmap(picture, 90, 50, 220, 110) }, "${fileName}_units.png", cols = 2)
+        // Each number of the scale is printed where the hand points for its value, in its own units only
+        fun numberAt(picture: Bitmap, mgdlValue: Double): Int = pixelsNear(picture, polar(FAN_X, FAN_Y, FAN_LABEL_R, bgAngle(mgdlValue)).let { (x, y) -> RectF(x - 6f, y - 7f, x + 6f, y + 7f) }, palette.ink, 40)
+        for (value in MGDL_LABELS) assertWithMessage("mg/dL $value").that(numberAt(mgdl, value)).isGreaterThan(8)
+        for (value in LABELS) assertWithMessage("mmol/L $value").that(numberAt(mmol, value * MGDL_PER_MMOL)).isGreaterThan(8)
+        // 250 mg/dL is far from every mmol/L number: there the mmol/L scale is empty
+        assertThat(numberAt(mmol, 250.0)).isEqualTo(0)
+        // The same scale: the ends, the band and the hand do not change
+        assertThat(scaleTicks(true).first().first).isEqualTo(BG_MIN)
+        assertThat(scaleTicks(true).last().first).isEqualTo(BG_MAX)
+        storeSampleData(newFace())
+    }
+
+    @Test
+    fun theStockDesignOnlyUsesWhatPlainAapsKnows() {
+        assumeTrue(!animated)
+        val design = design(defaultDesign())
+        val text = design.toString()
+        assertThat(design.has(WakeAnimationSpec.JSON_KEY)).isFalse()
+        assertThat(design.has(LegacyDesign.WEATHER_LOOKS_KEY)).isFalse()
+        assertThat(design.has(LegacyDesign.DAY_LOOK_KEY)).isFalse()
+        assertThat(text).doesNotContain(LegacyDesign.MOON_LIGHT_KEY)
+        assertThat(text).doesNotContain("\"orbit\"")
+        assertThat(text).doesNotContain(WatchBatteryLevel.KEY)
+        assertThat(text).doesNotContain(JsonKeyValues.SUN_CYCLE.key)
+        assertThat(text).doesNotContain(JsonKeyValues.MOON_CYCLE.key)
+        val views = ViewKeys.entries.map { it.key }.toSet()
+        val keys = JsonKeys.entries.map { it.key }.toSet()
+        for (key in design.keys()) {
+            val value = design.get(key)
+            if (key == "metadata" || key == "dynData" || key == "dynPref") continue
+            if (key in views) {
+                for (property in (value as JSONObject).keys()) assertWithMessage("$key.$property").that(keys).contains(property)
+            } else assertWithMessage("key $key").that(keys).contains(key)
+        }
+        fun dynKeysKnown(where: String, dyn: JSONObject) {
+            for (property in dyn.keys()) assertWithMessage("$where.$property").that(keys.any { property.startsWith(it) }).isTrue()
+        }
+        for (entry in design.getJSONObject("dynData").keys()) dynKeysKnown("dynData $entry", design.getJSONObject("dynData").getJSONObject(entry))
+        // dynPref blocks: a preference plain AAPS knows, and answers made of known keys
+        val prefs = setOf(COMPLICATION_PREF, IOB_PREF, COB_PREF, DETAIL_PREF, JsonKeyValues.PREF_UNITS.key)
+        val dynPref = design.getJSONObject("dynPref")
+        for (entry in dynPref.keys()) {
+            val block = dynPref.getJSONObject(entry)
+            assertWithMessage("dynPref $entry").that(block.getString("prefKey")).isIn(prefs)
+            for (answer in listOf("true", "false")) block.optJSONObject(answer)?.let { a ->
+                a.optString("dynPref").takeIf { it.isNotEmpty() }?.let { next -> assertWithMessage("dynPref $entry -> $next").that(dynPref.has(next)).isTrue() }
+                    ?: dynKeysKnown("dynPref $entry.$answer", a)
+            }
+        }
     }
 
     @Test
@@ -989,6 +1339,13 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         const val PRINT_FONT = "BodoniModaSemiBold"
 
         const val JPEG_QUALITY = 90
+        const val PREVIEW_QUALITY = 82
+
+        /**
+         * The phone sends the files of the zip unpacked in one message: 321 KB arrived, 358 KB only after
+         * a long wait. Below 300 KB, so there is room to spare.
+         */
+        const val MAX_UNPACKED_BYTES = 300_000
         const val ANIMATION_MS = 6_000L
 
         const val DIAL_R = 191f
@@ -1013,6 +1370,11 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         const val BG_HIGH = 180.0
         const val MGDL_PER_MMOL = 18.0
         val LABELS = listOf(4.0, 7.0, 10.0, 15.0)
+        /** In mg/dL: a tick every 10, numbers at the ends of the range and at "very high". Three digits are wide: a fourth number would touch XI. */
+        const val MGDL_TICK = 10.0
+        val MGDL_LABELS = listOf(70.0, 180.0, 250.0)
+        /** The ticks and the numbers of the scale, a picture over the dial: the fan from its ticks (radius 80) to its numbers (radius 96 + half a number). */
+        val SCALE_BOX = RectF(100f, 60f, 300f, 140f)
         const val BG_HAND_LENGTH = 70f
         const val BG_HAND_BOX = 152
 
@@ -1044,6 +1406,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         const val STEPS_SIZE = 24
         const val STEPS_VIEW = "complication2"
         const val STEPS_SAMPLE = 6482L
+        const val HEART_SAMPLE = 72L
 
         /** The sky disc at 9 o'clock: its middle, its size, the horizon and the round of the sun and the moon. */
         const val SKY_X = 92f
@@ -1059,6 +1422,19 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         /** The moon: as big as the moon pictures drew it in a [BODY_SIZE] view, the watch draws it to fill its view. */
         const val MOON_DISC = 18
         const val CLOUD_SIZE = 40
+
+        /**
+         * IOB and COB in the disc: two lines, [DISC_LINE_GAP] apart (one line in the middle when only one
+         * shows). The views are as wide as the disc; the usual values fit inside its frame.
+         */
+        const val DISC_SIZE = 20
+        const val DISC_LINE_GAP = 24f
+        const val DISC_LINE_HEIGHT = 26f
+        const val DISC_TEXT_WIDTH = 84f
+        /** Detailed IOB, "(0.90|0.35)": smaller, so it fits. */
+        const val DETAIL_SIZE = 13
+        /** The ring of a complication with a range, along the inside of the disc. */
+        const val DISC_RING = 4
 
         /** The two power reserves at 4:30 and 7:30: the watch left, the phone right. */
         const val WATCH_X = 90f
@@ -1082,13 +1458,46 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         const val BG_HAND_VIEW = "patient_name"
         const val WATCH_HAND_VIEW = "delta"
         const val PHONE_HAND_VIEW = "avg_delta"
+        const val IOB_VIEW = "iob2"
+        /** The complication slot of the disc. */
+        const val DISC_SLOT = "complication1"
+        const val COB_VIEW = "cob2"
+        /** A text view no setting hides, with a transparent text: it only shows its picture. */
+        const val SCALE_VIEW = "hour"
         const val AGE_DYN = "bgAge"
         const val LOOP_DYN = "loopAge"
         const val BG_HAND_DYN = "bgHand"
         const val WATCH_HAND_DYN = "watchHand"
         const val PHONE_HAND_DYN = "phoneHand"
 
+        /** The dynPref blocks: the picture of the disc, the cover plate, the sun and the moon, the scale, and the size of IOB. */
+        const val DISC_CHART = "discChart"
+        const val DISC_PLATE = "discPlate"
+        const val DISC_HIDE = "discHide"
+        const val UNITS = "units"
+        const val IOB_TEXT = "iobText"
+        const val COB_TEXT = "cobText"
+
+        /** The settings the disc follows. */
+        val COMPLICATION_PREF = CwfMetadataKey.CWF_PREF_WATCH_SHOW_COMPLICATION1.key
+        val IOB_PREF = CwfMetadataKey.CWF_PREF_WATCH_SHOW_IOB.key
+        val COB_PREF = CwfMetadataKey.CWF_PREF_WATCH_SHOW_COB.key
+        val DETAIL_PREF = CwfMetadataKey.CWF_PREF_WATCH_SHOW_DETAILED_IOB.key
+
+        const val FONT_LICENCE = "BodoniModa-OFL.txt"
+
+        const val COMMENT = "A dress watch: glucose scale and window, sun and moon over a horizon, date, steps and two power reserves. " +
+            "Complication 1 (settings of the face), or Show IOB or Show COB (watch settings, Display), puts it in the sky disc. The scale follows the units of the phone. No graph, no seconds"
+        const val STOCK_COMMENT = "A dress watch: glucose scale and window, a disc for IOB and COB, date, steps and the phone power reserve. " +
+            "The disc shows complication 1 (settings of the watch face) or else IOB and COB (watch: AAPS, Settings, Display, Show IOB and Show COB); with all off there is no disc. " +
+            "The scale follows the units of the phone (mmol/L or mg/dL). No graph, no seconds. " +
+            "Copy for AAPS 4.0: no wake animation, no sun, moon or weather, no watch power reserve."
+
         /** The pictures. */
+        const val SUB_DIAL = "SubDial"
+        const val COVER_PLATE_OPEN = "CoverPlateOpen"
+        const val SCALE_MMOL = "ScaleMmol"
+        const val SCALE_MGDL = "ScaleMgdl"
         const val SUN = "Sun"
         const val CLOUD = "Cloud"
         const val CLOUD_PARTLY = "CloudPartly"
@@ -1102,5 +1511,8 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         /** An afternoon with the sun and the moon both up, and an evening with the sun down and the moon high (moon about 11 days old). */
         val AFTERNOON_MS: Long = LocalDateTime.of(2026, 11, 16, 14, 10).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val EVENING_MS: Long = LocalDateTime.of(2026, 11, 20, 21, 10).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+        /** 22:10 the same evening: the hands leave the disc free, for the preview of the plain AAPS copy (it shows IOB and COB). */
+        val LATE_EVENING_MS: Long = LocalDateTime.of(2026, 11, 20, 22, 10).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
     }
 }

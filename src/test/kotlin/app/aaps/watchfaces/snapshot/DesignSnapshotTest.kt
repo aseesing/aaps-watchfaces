@@ -147,8 +147,9 @@ class DesignSnapshotTest(private val zipName: String) {
         val face = engine.Face("snap_${design.name}_$scene")
         face.settingsAtDefaults()
         if (colours) face.chooseColours()
-        face.feed(data, at)
+        // The design first: the watch keeps the place only for a design that needs it
         face.show(design)
+        face.feed(data, at)
         check(engine.engineNow() == clock.now) { "The engine does not read the frozen clock: ${engine.engineNow()} against ${clock.now}" }
         return face
     }

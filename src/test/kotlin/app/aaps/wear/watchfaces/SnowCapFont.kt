@@ -131,9 +131,17 @@ class SnowCapFontBuilder(private val source: TtfSource, private val shaper: Snow
             val contours = if (codes[index].toChar() in SnowCapFont.DIGITS) shaper.cut(glyph.contours, cap[index].contours) else glyph.contours
             TtfGlyph(contours, glyph.advance)
         }
-        // The same box in all heads: Android uses it for the font padding of a text view
+        // The same box in all heads: Android uses it for the font padding of a text view (the top and
+        // the bottom of its font metrics). It reaches at least to the ascent and the descent of the
+        // font: else a one-line text lies higher on the watch than a text of two lines and than in
+        // the phone preview. The watch app targets Android 11, where a one-line text (BoringLayout)
+        // starts at the top of the box, but a longer one (StaticLayout) at the ascent when that is
+        // higher; apps for Android 13 and newer (the phone, these tests) use the ascent for both.
         val all = (base + cap).flatMap { it.contours }.flatten()
-        val box = intArrayOf(all.minOf { it.x }, all.minOf { it.y }, all.maxOf { it.x }, all.maxOf { it.y })
+        val hhea = source.table("hhea")
+        val ascent = source.s16(hhea + 4)
+        val descent = source.s16(hhea + 6) // negative: below the baseline
+        val box = intArrayOf(all.minOf { it.x }, min(all.minOf { it.y }, descent), all.maxOf { it.x }, max(all.maxOf { it.y }, ascent))
         val writer = TtfWriter(source, codes, box)
         return SnowCapFonts(
             base = writer.write(base, family = "Aurora Digits", postScriptName = "AuroraDigits-Regular"),
