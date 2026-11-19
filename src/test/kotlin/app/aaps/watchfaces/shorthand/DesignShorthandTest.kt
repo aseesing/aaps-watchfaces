@@ -171,8 +171,8 @@ class DesignShorthandTest {
         assertSameJson(new.getJSONObject("freetext2"), JSONObject("{}"))
         // The watch has no moon template: the design carries it, also when it has no animation of its own
         assertSameJson(new.getJSONObject("animation"), JSONObject().put("layers", JSONArray()).put("templates", JSONObject().put("moon", MoonTemplate.json())))
-        // A design without a moon gets none
-        assertThat(translate("""{"freetext1": {"moonLight": false}, "animation": {"rain": {}}}""").getJSONObject("animation").has("templates")).isFalse()
+        // A design without a moon gets none: only the templates it uses
+        assertThat(translate("""{"freetext1": {"moonLight": false}, "animation": {"rain": {}}}""").getJSONObject("animation").getJSONObject("templates").has("moon")).isFalse()
     }
 
     @Test
