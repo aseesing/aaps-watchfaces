@@ -29,7 +29,6 @@ import app.aaps.wear.R
 import app.aaps.wear.health.HealthKind
 import app.aaps.wear.watchfaces.animation.WakeAnimationSpec
 import app.aaps.wear.watchfaces.daynight.DayNightClock
-import app.aaps.wear.watchfaces.daynight.MoonPicture
 import app.aaps.watchfaces.shorthand.DesignShorthand
 import app.aaps.watchfaces.shorthand.DesignShorthand.Orbit
 import app.aaps.wear.watchfaces.utils.WatchBatteryLevel
@@ -276,7 +275,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
                 val top = skyOrbit(key).point(0.25)
                 picture(view, top.first, top.second, size, picture).put("orbit", skyOrbitJson(key)).put("dynPref", DISC_HIDE)
             }
-            // The moon is drawn by the watch from its photo, lit and turned as it is in the sky now (see MoonPicture)
+            // The moon is drawn by the watch from its photo, lit and turned as it is in the sky now (the moon template, see MoonTemplate)
             val moonTop = skyOrbit(JsonKeyValues.MOON_CYCLE.key).point(0.25)
             place(MOON_VIEW, (moonTop.first - MOON_DISC / 2f).toInt(), (moonTop.second - MOON_DISC / 2f).toInt(), MOON_DISC)
                 .put("textvalue", "").put(DesignShorthand.MOON_LIGHT_KEY, true).put("orbit", skyOrbitJson(JsonKeyValues.MOON_CYCLE.key)).put("dynPref", DISC_HIDE)
