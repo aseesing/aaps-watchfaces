@@ -5,6 +5,9 @@ Custom watch face (CWF) designs for the AAPS watch app. Each design is a zip tha
 
 Most of them need the AAPS fork [aseesing/AndroidAPS](https://github.com/aseesing/AndroidAPS)
 (branch `local/personal`): its watch app plays the wake-up animations and knows the extra values.
+The keys a design can use for them (layers, formulas, templates, looks) are in
+[the manual of the layer engine](https://htmlpreview.github.io/?https://github.com/aseesing/AndroidAPS/blob/local/personal/docs/watchface-animation.html),
+with a live picture for every example.
 `Aurora_Town_mmol_AAPS4.zip` and `Aurora_Town_mgdl_AAPS4.zip` are made for plain AAPS 4.0.0 (glucose in mmol/L or mg/dL).
 `Grand_Complication_Day_AAPS4.zip` and `Grand_Complication_Night_AAPS4.zip` are made for plain AAPS 4.0.0 too.
 
