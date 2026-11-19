@@ -8,6 +8,7 @@ import android.graphics.Bitmap
 import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.CornerPathEffect
 import android.graphics.LinearGradient
 import android.graphics.Matrix
 import android.graphics.Paint
@@ -21,6 +22,7 @@ import android.graphics.Shader
 import android.graphics.SweepGradient
 import android.graphics.Typeface
 import android.provider.Settings
+import android.widget.TextView
 import androidx.core.graphics.createBitmap
 import androidx.wear.watchface.complications.data.ComplicationType
 import app.aaps.core.interfaces.rx.weardata.CwfData
@@ -40,6 +42,7 @@ import app.aaps.wear.watchfaces.colour.ColourLooks
 import app.aaps.wear.watchfaces.daynight.DayNightClock
 import app.aaps.watchfaces.shorthand.DesignShorthand
 import app.aaps.wear.watchfaces.daynight.StoredWeather
+import app.aaps.wear.watchfaces.design.Looks
 import app.aaps.wear.watchfaces.utils.DesignTimeText
 import app.aaps.wear.watchfaces.utils.LogTimeGraph
 import app.aaps.wear.watchfaces.utils.LogTimeScale
@@ -86,7 +89,11 @@ import kotlin.math.sqrt
  * - the **time left** of the sensor and the pod (or cannula) at the bottom left, where the original has its
  *   daily goal: one scale along the edge from 72 hours at the top to 0 at the bottom, red for the last 12
  *   hours, and two hands that come in from the edge, cyan for the sensor and orange for the pump. The ends
- *   are those of the phone's status lights; more than 72 hours shows as 72. No hand when it is not known;
+ *   are those of the phone's status lights; more than 72 hours shows as 72. No hand when it is not known.
+ *   With less than 12 hours left a hand blinks in the wake-up animation, after the hands have swung;
+ * - a **warning** in red with less than 4 hours left: the row of the sunrise and sunset shows "SENSOR 2.5h" or
+ *   "PUMP 2.5h" (or "SENSOR ENDED") in place of the sun time, with a warning sign in place of the sun.
+ *   "SENSOR + PUMP" when both have less than 4 hours;
  * - the **trend dial**: a big half circle right of the time, against the rim, with a steel arrow that turns with
  *   the delta of the glucose, not in the seven steps of the arrows: straight right when it stays the same,
  *   45 degrees up at +7.5 mg/dL in 5 minutes, straight up at +15 or more, and the same way down. No arrow
@@ -295,6 +302,16 @@ open class CwfD2DesignTest : CwfDesignBase() {
             .put(SUN_TIME_DYN, JSONObject().put("valueKey", DayNightClock.NEXT_SUN_EVENT_KEY).put("minData", 0).put("maxData", 1)
                 .put("textvalue1", DesignTimeText.TOKEN).put("invalidTextvalue", "--:--"))
             .put(TEMPERATURE_DYN, JSONObject().put("valueKey", StoredWeather.JSON_VALUE_KEY).put("textvalue1", "%.0f°").put("invalidTextvalue", ""))
+            .put(SENSOR_WARN_DYN, warningDynData(PartTimeLeft.SENSOR_KEY, "SENSOR"))
+            .put(PUMP_WARN_DYN, warningDynData(PartTimeLeft.PUMP_KEY, "PUMP"))
+            .put(BOTH_WARN_DYN, JSONObject().put("valueKey", PartTimeLeft.SENSOR_KEY).put("minData", -WARN_HOURS).put("maxData", WARN_HOURS)
+                .put("textvalue1", "SENSOR + PUMP"))
+
+        // With less than [WARN_HOURS] left the row of the sun shows a warning in its place. The last look that is on wins.
+        put(Looks.JSON_KEY, JSONArray()
+            .put(warningLook("v_${PartTimeLeft.SENSOR_KEY} < $WARN_HOURS", SENSOR_WARN_DYN))
+            .put(warningLook("v_${PartTimeLeft.PUMP_KEY} < $WARN_HOURS", PUMP_WARN_DYN))
+            .put(warningLook("v_${PartTimeLeft.SENSOR_KEY} < $WARN_HOURS && v_${PartTimeLeft.PUMP_KEY} < $WARN_HOURS", BOTH_WARN_DYN)))
 
         // The weather: the icon of each kind, by day and by night. Without a weather (none, or too old) no icon.
         put(DesignShorthand.WEATHER_LOOKS_KEY, JSONObject().apply {
@@ -311,6 +328,25 @@ open class CwfD2DesignTest : CwfDesignBase() {
             .put("colour2", JSONObject().put("day", JSONObject().put("fontColor", ColourLooks.PLACEHOLDER))))
 
         put(WakeAnimationSpec.JSON_KEY, wakeAnimation())
+    }
+
+    /**
+     * The text of the warning of one part: "<word> 2.5h" with 0 to [WARN_HOURS] hours left, "<word> ENDED" once the end
+     * has passed (the value is below 0 then; the watch counts every value below `minData` as the first step).
+     */
+    private fun warningDynData(valueKey: String, word: String): JSONObject = JSONObject()
+        .put("valueKey", valueKey).put("minData", -WARN_HOURS).put("maxData", WARN_HOURS)
+        .put("textvalue1", "$word ENDED").put("textvalue2", "$word %.1fh")
+
+    /**
+     * A look that turns the sun time into a warning while [condition] is true: the view takes the whole row, with the
+     * [WARN_PLATE] under it to cover the sun icon of the background, and shows the text of [dynData] in red at the right.
+     */
+    private fun warningLook(condition: String, dynData: String): JSONObject {
+        val (top, height) = centredText(WARN_BOX, WARN_SIZE, textFont())
+        return JSONObject().put(Looks.WHEN, condition).put(Looks.PATCH, JSONObject().put(SUN_TIME_VIEW, JSONObject()
+            .put("leftmargin", WARN_BOX.left.toInt()).put("topmargin", top).put("width", WARN_BOX.width().toInt()).put("height", height)
+            .put("textsize", WARN_SIZE).put("gravity", "right").put("fontColor", LOW).put("background", WARN_PLATE).put("dynData", dynData)))
     }
 
     /**
@@ -340,7 +376,18 @@ open class CwfD2DesignTest : CwfDesignBase() {
                 .put("rings", JSONArray().put(JSONObject().put("cx", 200).put("cy", 200).put("inner", RIM_INNER).put("outer", 200)))
                 .put("boxes", JSONArray().put(box(GRAPH_WINDOW))).put("cornerRadius", 4)
                 .put("delayMs", GLINT_DELAY_MS).put("durationMs", GLINT_MS).put("angle", GLINT_ANGLE).put("width", 90).put("color", "#FFFFFF").put("alpha", 210))
+            .put("layers", JSONArray().put(handBlink(SENSOR_NEEDLE_VIEW, PartTimeLeft.SENSOR_KEY)).put(handBlink(PUMP_NEEDLE_VIEW, PartTimeLeft.PUMP_KEY)))
     }
+
+    /**
+     * A time-left hand that blinks while less than [BLINK_HOURS] are left (or the end has passed): from [BLINK_START_MS],
+     * when the hands have swung back, shown for the first half of each [BLINK_PERIOD_MS] and hidden for the second. A view
+     * layer of its own, not the blink template, because that one starts at once, while the hand still swings. The sweep
+     * of the same view still works: the alphas of the layers of one view are multiplied.
+     */
+    private fun handBlink(view: String, valueKey: String): JSONObject = JSONObject().put("view", view).put(
+        "alpha", "if(v_$valueKey < $BLINK_HOURS && ms >= $BLINK_START_MS && mod(ms - $BLINK_START_MS, $BLINK_PERIOD_MS) >= ${BLINK_PERIOD_MS / 2}, 0, 1)"
+    )
 
     /** A battery number: the value in white, red at 20 % or less (five steps over 1 to 101), `--` without a value. */
     private fun batteryNumberDynData(valueKey: String): JSONObject = JSONObject().put("valueKey", valueKey).put("minData", 1).put("maxData", 101)
@@ -478,6 +525,7 @@ open class CwfD2DesignTest : CwfDesignBase() {
         TREND_HAND to trendHand(),
         MONTH_MARK to monthMark(),
         PERIOD_FRAME to periodFrame(),
+        WARN_PLATE to warningPlate(),
         ResFileMap.SECOND_HAND.fileName to runnerPicture(),
         BLANK to blankPng()
     ) + weatherIcons()
@@ -1237,6 +1285,36 @@ open class CwfD2DesignTest : CwfDesignBase() {
         return pngBytes(image)
     }
 
+    /**
+     * The picture under the warning (see [warningLook]), as big as its view: the row of the sun in the colour of the
+     * panel, so the sun icon and the sun time of the background do not show, and a red warning sign where the sun icon is.
+     * See-through above and below the row, where the view is taller than it.
+     */
+    private fun warningPlate(): ByteArray {
+        val s = SCALE
+        val (viewTop, h) = centredText(WARN_BOX, WARN_SIZE, textFont())
+        val image = createBitmap((WARN_BOX.width() * s).toInt(), (h * s).toInt()).apply { eraseColor(Color.TRANSPARENT) }
+        val canvas = Canvas(image)
+        // In the coordinates of the face from here on
+        canvas.translate(-WARN_BOX.left * s, -viewTop * s)
+        canvas.drawRect(WARN_BOX.left * s, WARN_BOX.top * s, WARN_BOX.right * s, WARN_BOX.bottom * s, paint(PANEL))
+        // The sign: a red triangle with round corners and a dark "!" in it, about as big as the sun icon
+        val x = ROW_ICON_X
+        val y = SUN_ROW_Y
+        val r = WARN_SIGN_SIZE / 2f
+        val triangle = Path().apply {
+            moveTo(x * s, (y - r) * s)
+            lineTo((x + r * 1.1f) * s, (y + r * 0.85f) * s)
+            lineTo((x - r * 1.1f) * s, (y + r * 0.85f) * s)
+            close()
+        }
+        canvas.drawPath(triangle, paint(LOW).apply { pathEffect = CornerPathEffect(2f * s) })
+        val mark = paint(PANEL, width = 2.2f).apply { strokeCap = Paint.Cap.ROUND }
+        canvas.drawLine(x * s, (y - r * 0.35f) * s, x * s, (y + r * 0.3f) * s, mark)
+        canvas.drawCircle(x * s, (y + r * 0.6f) * s, 1.2f * s, paint(PANEL))
+        return pngBytes(image)
+    }
+
     // ------------------------------------------------------------------------------------------
     // Rendering helpers of the tests
     // ------------------------------------------------------------------------------------------
@@ -1285,14 +1363,17 @@ open class CwfD2DesignTest : CwfDesignBase() {
 
     /**
      * The frames of the wake-up animation at the times [atMs] (in order), drawn by the real views of the sample face and a
-     * [WakeAnimator] with a test clock; null for a time where the face is drawn the normal way again.
+     * [WakeAnimator] with a test clock; null for a time where the face is drawn the normal way again. The wake starts at
+     * the first time of [atMs]. Its formulas read [sensorHours] and [pumpHours] as the time left (the face reads the same
+     * values for the hands, but its reader is internal to the watch app).
      */
-    private fun wakeFrames(atMs: List<Long>): Map<Long, Bitmap?> {
-        val (face, design) = preparedFace()
+    private fun wakeFrames(atMs: List<Long>, sensorHours: Double? = SENSOR_HOURS_SAMPLE, pumpHours: Double? = PUMP_HOURS_SAMPLE): Map<Long, Bitmap?> {
+        val (face, design) = preparedFace(sensorHours = sensorHours, pumpHours = pumpHours)
         // The views exist only after a first draw
         face.renderToBitmap(400, 400).recycle()
         var clock = 0L
-        val animator = WakeAnimator(heartRate = { 72 }, timer = WakeTimer { clock })
+        val timeLeft = mapOf(PartTimeLeft.SENSOR_KEY to sensorHours, PartTimeLeft.PUMP_KEY to pumpHours)
+        val animator = WakeAnimator(heartRate = { 72 }, timer = WakeTimer { clock }, value = { key -> timeLeft[key] })
         animator.setDesign(readAnimation(design))
         return atMs.associateWith { ms ->
             clock = ms
@@ -1428,6 +1509,8 @@ open class CwfD2DesignTest : CwfDesignBase() {
             Triple("100%", WATCH_NUMBER_BOX, SMALL_SIZE), Triple("100%", PHONE_NUMBER_BOX, SMALL_SIZE), Triple("+0,12", DELTA_BOX, DELTA_SIZE), Triple("+2,8", DELTA_BOX, DELTA_SIZE), Triple("120", RectF(HR_BOX.left + HR_BOX.height(), HR_BOX.top, HR_BOX.right, HR_BOX.bottom), HR_SIZE),
             Triple("12.25U", IOB_BOX, LINE_SIZE), Triple("120g", COB_BOX, LINE_SIZE), Triple("10.85U/h", BASAL_BOX, LINE_SIZE),
             Triple("PM", PERIOD_BOX, PERIOD_SIZE), Triple("10:48 PM", SUN_TIME_BOX, SUN_TIME_SIZE),
+            // The warnings: in the place of the sun time, so they stay clear of the sign and under the LED mesh
+            Triple("SENSOR 3.9h", SUN_TIME_BOX, WARN_SIZE), Triple("SENSOR ENDED", SUN_TIME_BOX, WARN_SIZE), Triple("SENSOR + PUMP", SUN_TIME_BOX, WARN_SIZE),
             Triple("12345", RectF(STEPS_BOX.left + STEPS_BOX.height() + 2f, 0f, STEPS_BOX.right, 0f), STEPS_SIZE),
             Triple("-12°", TEMPERATURE_BOX, TEMPERATURE_SIZE), Triple("188", SGV_BOX, SGV_SIZE)
         ).filter { (text, box, size) -> textWidth(text, size) > box.width() }.map { (text, box, size) -> "$text: ${textWidth(text, size)} > ${box.width()}" }
@@ -1827,6 +1910,61 @@ open class CwfD2DesignTest : CwfDesignBase() {
         assertThat(last).isAtMost(GLINT_DELAY_MS + 100)
         assertThat(GLINT_DELAY_MS + GLINT_MS).isAtMost(ANIMATION_MS)
         assertThat(TRACE_DELAY_MS + TRACE_MS).isAtMost(ANIMATION_MS)
+        // The hands blink only after they have swung back, and long enough for a few blinks
+        assertThat(BLINK_START_MS).isAtLeast(last)
+        assertThat(ANIMATION_MS - BLINK_START_MS).isAtLeast(4 * BLINK_PERIOD_MS)
+    }
+
+    @Test
+    fun aHandBlinksWithLessThan12HoursLeft() {
+        val shown = BLINK_START_MS + BLINK_PERIOD_MS / 4
+        val hidden = BLINK_START_MS + BLINK_PERIOD_MS * 3 / 4
+        val times = listOf(shown, hidden, shown + 2 * BLINK_PERIOD_MS, hidden + 2 * BLINK_PERIOD_MS)
+        // The sensor with 10 hours blinks; the pump with 30 does not
+        // (the wake starts at the first time asked for, so 0 comes first)
+        val low = wakeFrames(listOf(0L) + times, sensorHours = 10.0, pumpHours = 30.0)
+        for (ms in times) {
+            val on = ms == shown || ms == shown + 2 * BLINK_PERIOD_MS
+            val frame = low.getValue(ms)!!
+            assertWithMessage("sensor at $ms").that(handAt(frame, 10.0, SENSOR_COLOUR) > 3).isEqualTo(on)
+            assertWithMessage("pump at $ms").that(handAt(frame, 30.0, PUMP_COLOUR)).isGreaterThan(3)
+        }
+        // The pump with 2 hours blinks too; the sensor with 13 does not
+        val pump = wakeFrames(listOf(0L, shown, hidden), sensorHours = 13.0, pumpHours = 2.0)
+        assertThat(handAt(pump.getValue(shown)!!, 2.0, PUMP_COLOUR)).isGreaterThan(3)
+        assertThat(handAt(pump.getValue(hidden)!!, 2.0, PUMP_COLOUR)).isEqualTo(0)
+        assertThat(handAt(pump.getValue(hidden)!!, 13.0, SENSOR_COLOUR)).isGreaterThan(3)
+    }
+
+    @Test
+    fun theSunRowWarnsWithLessThan4HoursLeft() {
+        val icon = RectF(ROW_ICON_X - 6f, SUN_ROW_Y - 6f, ROW_ICON_X + 6f, SUN_ROW_Y)
+        fun sunText(sensorHours: Double?, pumpHours: Double?): Pair<String, Bitmap> {
+            val (face, _) = preparedFace(sensorHours = sensorHours, pumpHours = pumpHours)
+            val picture = face.renderToBitmap(400, 400)
+            return face.layoutView!!.findViewById<TextView>(R.id.freetext3).text.toString() to picture
+        }
+        // Enough time left: the sun icon and the sun time, no red
+        val (_, normal) = sunText(54.0, 30.0)
+        assertThat(countNear(normal, icon, SUNSET_LOW, 60)).isGreaterThan(10)
+        assertThat(countNear(normal, SUN_TIME_BOX, VALUE, 40)).isGreaterThan(30)
+        assertThat(countNear(normal, SUN_TIME_BOX, LOW, 40)).isEqualTo(0)
+        val sheetPictures = mutableListOf("no warning" to normal)
+        for ((hours, expected) in listOf(
+            Pair(2.5 to 30.0, "SENSOR 2.5h"), Pair(54.0 to 0.5, "PUMP 0.5h"), Pair(-1.0 to 30.0, "SENSOR ENDED"), Pair(3.0 to 1.0, "SENSOR + PUMP")
+        )) {
+            val (text, picture) = sunText(hours.first, hours.second)
+            sheetPictures += expected to picture
+            assertWithMessage("text at $hours").that(text).isEqualTo(expected)
+            // A red sign in place of the sun, red text in place of the sun time
+            assertWithMessage("sun icon at $hours").that(countNear(picture, icon, SUNSET_LOW, 60)).isEqualTo(0)
+            assertWithMessage("sign at $hours").that(countNear(picture, icon, LOW, 40)).isGreaterThan(10)
+            assertWithMessage("red text at $hours").that(countNear(picture, SUN_TIME_BOX, LOW, 40)).isGreaterThan(30)
+            assertWithMessage("sun time at $hours").that(countNear(picture, SUN_TIME_BOX, VALUE, 40)).isEqualTo(0)
+            // The steps below are not covered
+            assertWithMessage("steps at $hours").that(countNear(picture, STEPS_BOX, VALUE, 40)).isEqualTo(countNear(normal, STEPS_BOX, VALUE, 40))
+        }
+        sheet(sheetPictures, "${fileName}_warnings.png")
     }
 
     @Test
@@ -2257,7 +2395,7 @@ open class CwfD2DesignTest : CwfDesignBase() {
          * The wake-up animation, in ms from the wrist raise: the pointers swing one after the other, the trend arrow
          * shakes, the graph draws itself in, and the light comes last, when everything has settled.
          */
-        const val ANIMATION_MS = 2700L
+        const val ANIMATION_MS = 6000L
         const val ANIMATION_FPS = 30
         const val SWEEP_UP_MS = 600L
         const val SWEEP_SETTLE_MS = 900L
@@ -2276,6 +2414,27 @@ open class CwfD2DesignTest : CwfDesignBase() {
         const val GLINT_ANGLE = 35.0
         const val PUMP_HOURS_SAMPLE = 30.0
         const val HOUR_MS = 60 * 60 * 1000L
+
+        /**
+         * A time-left hand blinks with less than [BLINK_HOURS] left (the red part of the scale), from when the last hand
+         * has swung back until the end of the wake (that is why the wake is longer than its other effects).
+         */
+        const val BLINK_HOURS = 12.0
+        const val BLINK_START_MS = PUMP_SWEEP_DELAY_MS + SWEEP_UP_MS + SWEEP_SETTLE_MS
+        const val BLINK_PERIOD_MS = 800L
+
+        /**
+         * With less than [WARN_HOURS] left the row of the sun shows a warning: in [WARN_BOX] (the row from left of its icon
+         * to the end of the sun time), the text at the right in [WARN_SIZE], on [WARN_PLATE] with a sign of [WARN_SIGN_SIZE].
+         */
+        const val WARN_HOURS = 4.0
+        val WARN_BOX = RectF(ROW_ICON_X - 15f, SUN_TIME_BOX.top, SUN_TIME_BOX.right, SUN_TIME_BOX.bottom)
+        const val WARN_SIZE = 18
+        const val WARN_SIGN_SIZE = 18f
+        const val WARN_PLATE = "WarnPlate"
+        const val SENSOR_WARN_DYN = "sensorWarning"
+        const val PUMP_WARN_DYN = "pumpWarning"
+        const val BOTH_WARN_DYN = "bothWarning"
 
         const val HR_SAMPLE = 72L
         const val STEPS_SAMPLE = 6375L
