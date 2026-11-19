@@ -4,6 +4,8 @@
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.lang.management.ManagementFactory
+import com.sun.management.OperatingSystemMXBean
 
 // The same Android and Kotlin Gradle plugins as AAPS
 buildscript {
@@ -72,8 +74,11 @@ tasks.withType<Test>().configureEach {
     // The design tests read a picture of AAPS (the moon photo of the watch)
     systemProperty("aaps.dir", aapsDir.path)
     maxHeapSize = "3g"
-    // The designs render on the CPU and do not share files: run several test classes at once
-    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 3).coerceIn(1, 4)
+    // The designs render on the CPU, one core per test JVM, and do not share files: run a test JVM on
+    // every core but one, as many as fit in the memory (a test JVM uses about 1 to 3 GB)
+    val memoryGb = (ManagementFactory.getOperatingSystemMXBean() as OperatingSystemMXBean)
+        .totalMemorySize / (1L shl 30)
+    maxParallelForks = minOf(Runtime.getRuntime().availableProcessors() - 1, (memoryGb / 3).toInt()).coerceAtLeast(1)
     // The design tests are not cached: they make the zips, so they must really run
     outputs.upToDateWhen { false }
     // Only some designs: ./gradlew testDebugUnitTest -Pdesigns=AuroraTown,D2 (part of the test class name)
@@ -91,6 +96,9 @@ tasks.withType<Test>().configureEach {
     val snapshotAsked = testArgs.any { "Snapshot" in it } || providers.gradleProperty("designs").orNull.orEmpty().contains("Snapshot") ||
         providers.gradleProperty("snapshotOut").isPresent
     systemProperty("snapshot.run", snapshotAsked.toString())
+    // The long design test classes run in parts, side by side (see PartRunner). Not with --tests: then
+    // a class runs whole, as asked.
+    systemProperty("test.parts", if ("--tests" in testArgs) "off" else "on")
     testLogging {
         events = setOf(TestLogEvent.FAILED, TestLogEvent.SKIPPED)
         exceptionFormat = TestExceptionFormat.FULL

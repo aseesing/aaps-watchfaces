@@ -75,8 +75,12 @@ class DesignShorthandTest {
                }}"""
         )
         val animation = new.getJSONObject(WakeAnimationSpec.JSON_KEY)
-        assertThat(animation.keys().asSequence().toSet()).containsExactly("durationMs", "fallbackBpm", "layers")
+        assertThat(animation.keys().asSequence().toSet()).containsExactly("durationMs", "fallbackBpm", "layers", "templates")
         assertThat(animation.getInt("fallbackBpm")).isEqualTo(70)
+        // The watch has no templates: the animation brings the ones it uses, as the manual writes them
+        val templates = animation.getJSONObject("templates")
+        assertThat(templates.keys().asSequence().toList()).containsExactly("rain", "glitch", "trace", "blink", "sweep", "slide", "wobble", "pulse", "glint").inOrder()
+        for (name in templates.keys()) assertSameJson(templates.getJSONObject(name), DesignTemplates.all().getJSONObject(name))
         assertSameJson(
             animation.getJSONArray("layers"), JSONArray(
                 """[
@@ -95,6 +99,13 @@ class DesignShorthandTest {
                 ]"""
             )
         )
+    }
+
+    @Test
+    fun onlyTheTemplatesThatAreUsedGoIntoTheZip() {
+        val animation = translate("""{"animation": {"rain": {}, "blink": [{"views": ["b"], "valueKey": ""}]}}""").getJSONObject(WakeAnimationSpec.JSON_KEY)
+        assertThat(animation.getJSONObject("templates").keys().asSequence().toList()).containsExactly("rain")
+        assertThat(translate("""{"animation": {"layers": [{"shape": "circle"}]}}""").getJSONObject(WakeAnimationSpec.JSON_KEY).has("templates")).isFalse()
     }
 
     @Test
@@ -120,8 +131,7 @@ class DesignShorthandTest {
 
     @Test
     fun theOldLayerKeysBecomeTheNewOnes() {
-        val layers = layersOf(
-            translate(
+        val new = translate(
                 """{"animation": {"layers": [
                      {"moon": true, "rect": {"left": 316, "top": 78, "width": 44, "height": 44}, "rest": 0},
                      {"moon": false, "shape": "circle"},
@@ -130,9 +140,10 @@ class DesignShorthandTest {
                      {"shape": "DOT", "x": 3, "radius": 7},
                      {"view": "chart", "clipRight": "200"}
                    ]}}"""
-            )
         )
-        assertSameJson(layers[0], JSONObject("""{"image": "@moon", "rect": {"left": 316, "top": 78, "width": 44, "height": 44}, "rest": 0}"""))
+        val layers = layersOf(new)
+        // The moon is the built-in template, in the square of the old rect
+        assertSameJson(layers[0], JSONObject("""{"use": "moon", "left": 316, "top": 78, "size": 44, "rest": 0}"""))
         assertSameJson(layers[1], JSONObject("""{"shape": "circle"}"""))
         // The old band had its middle at x
         assertSameJson(
@@ -143,16 +154,25 @@ class DesignShorthandTest {
         assertSameJson(layers[4], JSONObject("""{"shape": "circle", "x": 3, "radius": 7, "gradient": {"type": "radial", "stops": [[0, 1], [0.25, 1], [1, 0]]}}"""))
         // clipRight is the same key, now for any layer
         assertSameJson(layers[5], JSONObject("""{"view": "chart", "clipRight": "200"}"""))
-        val spec = WakeAnimationJson(::testColor) { null }.read(JSONObject().put(WakeAnimationSpec.JSON_KEY, JSONObject().put("layers", JSONArray(layers))))!!
-        assertThat(spec.layers[0].source).isInstanceOf(LayerSource.Dynamic::class.java)
-        assertThat((spec.layers[2].source as LayerSource.Shape).let { it.kind to it.gradient?.type }).isEqualTo(ShapeKind.RECT to LayerGradient.Type.LINEAR)
-        assertThat((spec.layers[4].source as LayerSource.Shape).colors).containsExactly(Color.WHITE)
+        val spec = WakeAnimationJson(::testColor) { null }.read(new)!!
+        assertThat(spec.errors).isEmpty()
+        // The design carries the template of the moon: it gives several plain layers, the photo of the app among them; the other layers follow
+        assertSameJson(new.getJSONObject("animation").getJSONObject("templates").getJSONObject("moon"), MoonTemplate.json())
+        val own = spec.layers.size - 5
+        assertThat(spec.layers.take(own).map { it.source }.filterIsInstance<LayerSource.Dynamic>().map { it.name }.distinct()).containsExactly("moon")
+        assertThat((spec.layers[own + 1].source as LayerSource.Shape).let { it.kind to it.gradient?.type }).isEqualTo(ShapeKind.RECT to LayerGradient.Type.LINEAR)
+        assertThat((spec.layers[own + 3].source as LayerSource.Shape).colors).containsExactly(Color.WHITE)
     }
 
     @Test
-    fun aViewWithTheMoonShowsThePictureOfTheApp() {
+    fun aViewWithTheMoonShowsTheTemplateOfTheMoon() {
         val new = translate("""{"freetext1": {"width": 20, "moonLight": true}, "freetext2": {"moonLight": false}}""")
-        assertSameJson(new, JSONObject("""{"freetext1": {"width": 20, "image": "@moon"}, "freetext2": {}}"""))
+        assertSameJson(new.getJSONObject("freetext1"), JSONObject("""{"width": 20, "image": {"use": "moon"}}"""))
+        assertSameJson(new.getJSONObject("freetext2"), JSONObject("{}"))
+        // The watch has no moon template: the design carries it, also when it has no animation of its own
+        assertSameJson(new.getJSONObject("animation"), JSONObject().put("layers", JSONArray()).put("templates", JSONObject().put("moon", MoonTemplate.json())))
+        // A design without a moon gets none: only the templates it uses
+        assertThat(translate("""{"freetext1": {"moonLight": false}, "animation": {"rain": {}}}""").getJSONObject("animation").getJSONObject("templates").has("moon")).isFalse()
     }
 
     @Test

@@ -39,7 +39,6 @@ import app.aaps.wear.watchfaces.animation.WakeTimer
 import app.aaps.wear.watchfaces.colour.ColourLooks
 import app.aaps.wear.watchfaces.daynight.DayNightClock
 import app.aaps.watchfaces.shorthand.DesignShorthand
-import app.aaps.wear.watchfaces.daynight.MoonPicture
 import app.aaps.wear.watchfaces.daynight.StoredWeather
 import app.aaps.wear.watchfaces.utils.DesignTimeText
 import app.aaps.wear.watchfaces.utils.LogTimeGraph
@@ -53,7 +52,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -100,7 +98,7 @@ import kotlin.math.sqrt
  * - the batteries of the watch and the phone (red at 20 % or less);
  * - all texts under a fine dark mesh, so they look like LED displays;
  * - the big time with seconds and AM/PM, the day, the date and the moon: drawn by the watch from a NASA photo,
- *   lit and turned as it stands in the sky now (see `MoonPicture`), the months of the year
+ *   lit and turned as it stands in the sky now (the moon template, see `MoonTemplate`), the months of the year
  *   with a mark on this month;
  * - a **graph** of the glucose of the last hours (as set on the watch, 3 by default) in a small sunk window at
  *   the bottom right, like the display of an instrument: dark tinted glass, a faint grid and dim dots in
@@ -117,10 +115,11 @@ import kotlin.math.sqrt
  * The texts and the numbers on the dial are in D2 Text (a cut-down Saira Condensed Medium), which the zip brings; the words
  * printed on the dial in Michroma (in the pictures only). Both are in `cwf-designs/fonts`, with their licences.
  */
-@RunWith(RobolectricTestRunner::class)
+@RunWith(PartRunner::class)
+@Part(0, 6)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35])
-class CwfD2DesignTest : CwfDesignBase() {
+open class CwfD2DesignTest : CwfDesignBase() {
 
     override val displayName = "D2"
     override val fileName = "D2"
@@ -1279,7 +1278,7 @@ class CwfD2DesignTest : CwfDesignBase() {
         storeSampleData(face, sample, bgAgeMin, loopAgeMin, phone, adjustStatus = {
             it.copy(sensorEndsAt = sensorHours?.let { h -> instant + (h * HOUR_MS).toLong() }, pumpEndsAt = pumpHours?.let { h -> instant + (h * HOUR_MS).toLong() })
         }, graph = graph)
-        Thread.sleep(600)   // past the render data share window
+        forgetLoadedRenderData(face)
         face.refreshRenderData()
         return face to design
     }
@@ -2285,3 +2284,15 @@ class CwfD2DesignTest : CwfDesignBase() {
         val PREVIEW_MS: Long = LocalDateTime.of(2026, 11, 13, 10, 8, 32).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
     }
 }
+
+// The other parts of the tests above, so they run side by side: see [PartRunner]
+@Part(1, 6)
+class CwfD2DesignTestPart1 : CwfD2DesignTest()
+@Part(2, 6)
+class CwfD2DesignTestPart2 : CwfD2DesignTest()
+@Part(3, 6)
+class CwfD2DesignTestPart3 : CwfD2DesignTest()
+@Part(4, 6)
+class CwfD2DesignTestPart4 : CwfD2DesignTest()
+@Part(5, 6)
+class CwfD2DesignTestPart5 : CwfD2DesignTest()

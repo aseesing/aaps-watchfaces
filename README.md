@@ -51,8 +51,13 @@ Run all design tests (this checks every design and writes every zip):
 ./gradlew testDebugUnitTest
 ```
 
-That takes about a quarter of an hour. When you change a design, build only that one (about a
-minute); the name is part of the test class name, more than one with commas:
+That takes about a minute on a Mac with 12 cores. The tests run in one test JVM per core but one, as
+many as fit in the memory (3 GB each). The long design test classes run in parts, so the parts run
+side by side: `CwfD2DesignTestPart1` and so on are the other parts of `CwfD2DesignTest` (see
+`PartRunner.kt`). With `--tests` a class runs whole and its other parts run nothing.
+
+When you change a design, build only that one; the name is part of the test class name, more than
+one with commas:
 
 ```
 ./gradlew testDebugUnitTest -Pdesigns=AuroraTown

@@ -4,6 +4,7 @@
 // ============================================================================================
 package app.aaps.wear.watchfaces
 
+import app.aaps.watchfaces.shorthand.MoonTemplate
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -39,7 +40,6 @@ import app.aaps.watchfaces.shorthand.DesignShorthand
 import app.aaps.wear.watchfaces.daynight.GeoPoint
 import app.aaps.wear.watchfaces.daynight.MoonLight
 import app.aaps.wear.watchfaces.daynight.MoonPhase
-import app.aaps.wear.watchfaces.daynight.MoonPicture
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import org.json.JSONArray
@@ -406,7 +406,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         mapOf(MOON_HALO to AuroraTownMoonGlow.haloPng(look)) + (if (AuroraTownMoonGlow.hasHole(look)) mapOf(MOON_HOLE to AuroraTownMoonGlow.holePng(look)) else emptyMap())
 
     /**
-     * The moon as the watch draws it (`"moon": true`, see [MoonPicture]): today's phase, turned as it
+     * The moon as the watch draws it (`"moon": true`, the moon template, see [MoonTemplate]): today's phase, turned as it
      * stands in the sky. A layer that stays on the face (`rest`), in the back slot below the aurora.
      */
     private fun moonLayer(): JSONObject {
@@ -571,7 +571,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
             override fun secondString(): String = real.secondString(instant)
         }
         storeSampleData(face, sample)
-        Thread.sleep(600)   // past the render data share window
+        forgetLoadedRenderData(face)
         face.refreshRenderData()
         // Lines placed as on the watch, the same way the phone preview does it: the watch app targets
         // Android 11, where a text of one line starts at the top of the font box (see WatchLineSpacing)
@@ -1007,7 +1007,8 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         val spec = readAnimation(design).normalized()
         val animator = LayerAnimator(spec.layers, spec.lets)
         assertWithMessage("${animator.errors}").that(animator.errors).isEmpty()
-        assertThat(animator.size).isEqualTo(design.getJSONObject(WakeAnimationSpec.JSON_KEY).getJSONArray("layers").length())
+        // One layer for each of the design, and the moon is a template of several layers
+        assertThat(animator.size).isEqualTo(design.getJSONObject(WakeAnimationSpec.JSON_KEY).getJSONArray("layers").length() - 1 + MoonTemplate.json().getJSONArray("layers").length())
         assertThat(animator.hasRest).isTrue()
 
         val times = listOf(0L, 1_500L, 4_000L, 8_000L, 13_500L, 14_960L, 15_000L)
@@ -1044,10 +1045,13 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         }
     }
 
-    /** The moon values the watch gives the layers ([key] `moon_phase` or `moon_cycle`) at [instant] in [place], worked out as the watch does. */
+    /** The moon values the watch gives the layers ([key], for example `moon_phase` or `moon_lit`) at [instant] in [place], worked out as the watch does. */
     private fun moonValue(key: String, instant: Long, place: GeoPoint?): Double? = when (key) {
         "moon_phase" -> MoonPhase.at(instant)
         "moon_cycle" -> DayNightClock(location = { place }).moonCycle(instant)
+        "moon_lit"   -> MoonLight.at(instant, place).litFraction
+        "moon_limb"  -> MoonLight.at(instant, place).limbTurn
+        "moon_north" -> MoonLight.at(instant, place).northTurn
         else         -> null
     }
 
