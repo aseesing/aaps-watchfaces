@@ -4,6 +4,7 @@
 // ============================================================================================
 package app.aaps.wear.watchfaces
 
+import app.aaps.watchfaces.shorthand.MoonTemplate
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -1007,7 +1008,8 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         val spec = readAnimation(design).normalized()
         val animator = LayerAnimator(spec.layers, spec.lets)
         assertWithMessage("${animator.errors}").that(animator.errors).isEmpty()
-        assertThat(animator.size).isEqualTo(design.getJSONObject(WakeAnimationSpec.JSON_KEY).getJSONArray("layers").length())
+        // One layer for each of the design, and the moon is a template of several layers
+        assertThat(animator.size).isEqualTo(design.getJSONObject(WakeAnimationSpec.JSON_KEY).getJSONArray("layers").length() - 1 + MoonTemplate.json().getJSONArray("layers").length())
         assertThat(animator.hasRest).isTrue()
 
         val times = listOf(0L, 1_500L, 4_000L, 8_000L, 13_500L, 14_960L, 15_000L)
@@ -1044,10 +1046,13 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         }
     }
 
-    /** The moon values the watch gives the layers ([key] `moon_phase` or `moon_cycle`) at [instant] in [place], worked out as the watch does. */
+    /** The moon values the watch gives the layers ([key], for example `moon_phase` or `moon_lit`) at [instant] in [place], worked out as the watch does. */
     private fun moonValue(key: String, instant: Long, place: GeoPoint?): Double? = when (key) {
         "moon_phase" -> MoonPhase.at(instant)
         "moon_cycle" -> DayNightClock(location = { place }).moonCycle(instant)
+        "moon_lit"   -> MoonLight.at(instant, place).litFraction
+        "moon_limb"  -> MoonLight.at(instant, place).limbTurn
+        "moon_north" -> MoonLight.at(instant, place).northTurn
         else         -> null
     }
 
