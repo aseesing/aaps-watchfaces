@@ -6,14 +6,14 @@ package app.aaps.wear.watchfaces
 
 import app.aaps.core.interfaces.rx.weardata.EventData
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
  * The day face of "Grand Complication" (`Grand_Complication_Day.zip`): a cream guilloché dial with blued Breguet hands and navy printing, a blue sky in the sky disc. See [GrandComplicationDesignBase].
  */
-@RunWith(RobolectricTestRunner::class)
+@RunWith(PartRunner::class)
+@Part(0, 3)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35])
 open class CwfGrandDayDesignTest : GrandComplicationDesignBase() {
@@ -34,3 +34,9 @@ open class CwfGrandDayDesignTest : GrandComplicationDesignBase() {
         Look("morning 09:00", MORNING_MS, null), Look("evening 21:10", EVENING_MS, null)
     )
 }
+
+// The other parts of the tests above, so they run side by side: see [PartRunner]
+@Part(1, 3)
+class CwfGrandDayDesignTestPart1 : CwfGrandDayDesignTest()
+@Part(2, 3)
+class CwfGrandDayDesignTestPart2 : CwfGrandDayDesignTest()

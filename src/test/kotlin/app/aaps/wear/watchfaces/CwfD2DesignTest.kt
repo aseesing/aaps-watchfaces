@@ -52,7 +52,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -116,10 +115,11 @@ import kotlin.math.sqrt
  * The texts and the numbers on the dial are in D2 Text (a cut-down Saira Condensed Medium), which the zip brings; the words
  * printed on the dial in Michroma (in the pictures only). Both are in `cwf-designs/fonts`, with their licences.
  */
-@RunWith(RobolectricTestRunner::class)
+@RunWith(PartRunner::class)
+@Part(0, 6)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35])
-class CwfD2DesignTest : CwfDesignBase() {
+open class CwfD2DesignTest : CwfDesignBase() {
 
     override val displayName = "D2"
     override val fileName = "D2"
@@ -1278,7 +1278,7 @@ class CwfD2DesignTest : CwfDesignBase() {
         storeSampleData(face, sample, bgAgeMin, loopAgeMin, phone, adjustStatus = {
             it.copy(sensorEndsAt = sensorHours?.let { h -> instant + (h * HOUR_MS).toLong() }, pumpEndsAt = pumpHours?.let { h -> instant + (h * HOUR_MS).toLong() })
         }, graph = graph)
-        Thread.sleep(600)   // past the render data share window
+        forgetLoadedRenderData(face)
         face.refreshRenderData()
         return face to design
     }
@@ -2284,3 +2284,15 @@ class CwfD2DesignTest : CwfDesignBase() {
         val PREVIEW_MS: Long = LocalDateTime.of(2026, 11, 13, 10, 8, 32).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
     }
 }
+
+// The other parts of the tests above, so they run side by side: see [PartRunner]
+@Part(1, 6)
+class CwfD2DesignTestPart1 : CwfD2DesignTest()
+@Part(2, 6)
+class CwfD2DesignTestPart2 : CwfD2DesignTest()
+@Part(3, 6)
+class CwfD2DesignTestPart3 : CwfD2DesignTest()
+@Part(4, 6)
+class CwfD2DesignTestPart4 : CwfD2DesignTest()
+@Part(5, 6)
+class CwfD2DesignTestPart5 : CwfD2DesignTest()

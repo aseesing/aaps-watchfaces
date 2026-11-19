@@ -5,7 +5,6 @@
 package app.aaps.wear.watchfaces
 
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -14,10 +13,11 @@ import org.robolectric.annotation.GraphicsMode
  * [CwfGrandNightDesignTest], without the wake-up animation, the sun, the moon, the weather and the watch battery.
  * The disc shows complication 1, or IOB and COB; with all off it is not there. See [GrandComplicationDesignBase].
  */
-@RunWith(RobolectricTestRunner::class)
+@RunWith(PartRunner::class)
+@Part(0, 2)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35])
-class CwfGrandNightStockDesignTest : CwfGrandNightDesignTest() {
+open class CwfGrandNightStockDesignTest : CwfGrandNightDesignTest() {
 
     override val displayName = "Grand Complication Night (AAPS 4.0)"
     override val fileName = "Grand_Complication_Night_AAPS4"
@@ -25,3 +25,7 @@ class CwfGrandNightStockDesignTest : CwfGrandNightDesignTest() {
     override val previewInstant = LATE_EVENING_MS
     override val looks = listOf(Look("preview", previewInstant, null))
 }
+
+// The other parts of the tests above, so they run side by side: see [PartRunner]
+@Part(1, 2)
+class CwfGrandNightStockDesignTestPart1 : CwfGrandNightStockDesignTest()

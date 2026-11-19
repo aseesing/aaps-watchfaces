@@ -6,14 +6,14 @@ package app.aaps.wear.watchfaces
 
 import app.aaps.core.interfaces.rx.weardata.EventData
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
  * The night face of "Grand Complication" (`Grand_Complication_Night.zip`): a midnight blue guilloché dial with golden hands and printing, a starry sky in the sky disc. Dark, so it also suits the always-on screen. See [GrandComplicationDesignBase].
  */
-@RunWith(RobolectricTestRunner::class)
+@RunWith(PartRunner::class)
+@Part(0, 3)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35])
 open class CwfGrandNightDesignTest : GrandComplicationDesignBase() {
@@ -34,3 +34,9 @@ open class CwfGrandNightDesignTest : GrandComplicationDesignBase() {
         Look("23:00, young moon down", NIGHT_MS, null), Look("afternoon", AFTERNOON_MS, null)
     )
 }
+
+// The other parts of the tests above, so they run side by side: see [PartRunner]
+@Part(1, 3)
+class CwfGrandNightDesignTestPart1 : CwfGrandNightDesignTest()
+@Part(2, 3)
+class CwfGrandNightDesignTestPart2 : CwfGrandNightDesignTest()

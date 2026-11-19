@@ -804,7 +804,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         val design = design(default)
         val face = storedFace(design, default, images(), instant, weather, watch) { applyOptions(it, options) }
         storeSampleData(face, sample, bgAgeMin, loopAgeMin, phone)
-        Thread.sleep(600)   // past the render data share window
+        forgetLoadedRenderData(face)
         face.refreshRenderData()
         val picture = face.renderToBitmap(400, 400)
         drawComplicationValues(Canvas(picture), lookOf(design, weather))

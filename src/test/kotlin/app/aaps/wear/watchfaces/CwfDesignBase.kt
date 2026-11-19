@@ -110,7 +110,32 @@ abstract class CwfDesignBase {
      */
     private val host: PreviewHost by lazy { PreviewHost(RuntimeEnvironment.getApplication(), mock<AAPSLogger>(), "cwf_design") }
 
-    protected fun newFace() = CustomWatchface().apply { prepareForRendering(host) }
+    protected fun newFace() = CustomWatchface().apply {
+        prepareForRendering(host)
+        writeWithoutWaiting(complicationDataRepository)
+    }
+
+    /**
+     * The repository waits [BATCH_WINDOW_FIELD] (half a second) before each write of live data, to write
+     * the updates that come close together at once. A test stores its sample data in three updates, one
+     * after the other, for every face: that waiting was most of the time of the tests. The data is the
+     * same without it. The field is internal to AAPS, so it is set by its name.
+     */
+    private fun writeWithoutWaiting(repository: Any) {
+        repository.javaClass.getDeclaredField(BATCH_WINDOW_FIELD).apply { isAccessible = true }.setLong(repository, 0L)
+    }
+
+    /**
+     * Makes the next `refreshRenderData` of [face] load the data again. A face keeps the data it loaded
+     * for half a second ([RENDER_DATA_LOAD_FIELD]), so the halves of one split render agree. A test that
+     * has just stored new data loads it at once with this. The field is private to AAPS, so it is
+     * set by its name.
+     */
+    protected fun forgetLoadedRenderData(face: CustomWatchface) {
+        val owner = generateSequence<Class<*>>(face.javaClass) { it.superclass }
+            .first { type -> type.declaredFields.any { it.name == RENDER_DATA_LOAD_FIELD } }
+        owner.getDeclaredField(RENDER_DATA_LOAD_FIELD).apply { isAccessible = true }.setLong(face, 0L)
+    }
 
     /**
      * The instant the last [storedFace] draws for, or null before the first. The face shows the ages of
@@ -286,7 +311,7 @@ abstract class CwfDesignBase {
         prefs(face)
         val resData = resources(default, images)
         runBlocking { face.complicationDataRepository.storeCustomWatchface(CwfData(forWatch(design, resData.keys).toString(4), ZipWatchfaceFormat.loadMetadata(design), resData)) }
-        Thread.sleep(600)   // past the render data share window
+        forgetLoadedRenderData(face)
         Settings.System.putString(RuntimeEnvironment.getApplication().contentResolver, Settings.System.TIME_12_24, "24")
         face.refreshRenderData()
         return face
@@ -505,6 +530,12 @@ abstract class CwfDesignBase {
         const val WATCH_SAMPLE = 66
 
         const val BLANK = "Blank"
+
+        /** The field of `ComplicationDataRepository` in AAPS with the time it waits before a write of live data. */
+        const val BATCH_WINDOW_FIELD = "batchWindowMs"
+
+        /** The field of `BaseWatchFace` in AAPS with the time a face last loaded its data. */
+        const val RENDER_DATA_LOAD_FIELD = "lastRenderDataLoad"
 
         /** The moments the pictures show: 11 November 2026 at 23:00 (night), at 09:00 and at noon (day), local time. */
         val NIGHT_MS: Long = LocalDateTime.of(2026, 11, 11, 23, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()

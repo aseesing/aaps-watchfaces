@@ -571,7 +571,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
             override fun secondString(): String = real.secondString(instant)
         }
         storeSampleData(face, sample)
-        Thread.sleep(600)   // past the render data share window
+        forgetLoadedRenderData(face)
         face.refreshRenderData()
         // Lines placed as on the watch, the same way the phone preview does it: the watch app targets
         // Android 11, where a text of one line starts at the top of the font box (see WatchLineSpacing)
