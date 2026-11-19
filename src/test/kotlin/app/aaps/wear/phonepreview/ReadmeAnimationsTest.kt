@@ -119,7 +119,9 @@ class ReadmeAnimationsTest {
         EventData.Status(
             dataset = 0, externalStatus = "", iobSum = "1.25", iobDetail = "(0.90|0.35)", cob = "12g", currentBasal = "0.85U/h",
             battery = face.phoneBattery.toString(), rigBattery = "--", openApsStatus = now - 180_000L, bgi = "-0.4", batteryLevel = 1,
-            tempTarget = "100", tempTargetLevel = 0, reservoirString = "120U", reservoir = 120.0, reservoirLevel = 0
+            tempTarget = "100", tempTargetLevel = 0, reservoirString = "120U", reservoir = 120.0, reservoirLevel = 0,
+            // The same sample times as the still previews, so D2 draws its sensor and pump needles
+            sensorEndsAt = now + 60 * HOUR_MS, pumpEndsAt = now + 10 * HOUR_MS
         ),
         // A whole day for the log time graph: every 5 minutes for the last 6 hours, then thinner, as the phone sends it
         EventData.GraphData(ArrayList(graphAges().map { age ->
@@ -205,6 +207,7 @@ class ReadmeAnimationsTest {
         const val BEZEL = 10
         const val WAKE_MS = 4000L
         const val FRAME_MS = 80L
+        const val HOUR_MS = 3_600_000L
 
         /** The wake, and a moment of the still face after it. */
         const val FRAMES = ((WAKE_MS + 1200L) / FRAME_MS).toInt()
