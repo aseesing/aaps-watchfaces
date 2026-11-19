@@ -39,7 +39,6 @@ import app.aaps.wear.watchfaces.animation.WakeTimer
 import app.aaps.wear.watchfaces.colour.ColourLooks
 import app.aaps.wear.watchfaces.daynight.DayNightClock
 import app.aaps.watchfaces.shorthand.DesignShorthand
-import app.aaps.wear.watchfaces.daynight.MoonPicture
 import app.aaps.wear.watchfaces.daynight.StoredWeather
 import app.aaps.wear.watchfaces.utils.DesignTimeText
 import app.aaps.wear.watchfaces.utils.LogTimeGraph
@@ -100,7 +99,7 @@ import kotlin.math.sqrt
  * - the batteries of the watch and the phone (red at 20 % or less);
  * - all texts under a fine dark mesh, so they look like LED displays;
  * - the big time with seconds and AM/PM, the day, the date and the moon: drawn by the watch from a NASA photo,
- *   lit and turned as it stands in the sky now (see `MoonPicture`), the months of the year
+ *   lit and turned as it stands in the sky now (the moon template, see `MoonTemplate`), the months of the year
  *   with a mark on this month;
  * - a **graph** of the glucose of the last hours (as set on the watch, 3 by default) in a small sunk window at
  *   the bottom right, like the display of an instrument: dark tinted glass, a faint grid and dim dots in

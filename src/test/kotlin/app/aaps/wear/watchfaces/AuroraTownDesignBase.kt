@@ -40,7 +40,6 @@ import app.aaps.watchfaces.shorthand.DesignShorthand
 import app.aaps.wear.watchfaces.daynight.GeoPoint
 import app.aaps.wear.watchfaces.daynight.MoonLight
 import app.aaps.wear.watchfaces.daynight.MoonPhase
-import app.aaps.wear.watchfaces.daynight.MoonPicture
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import org.json.JSONArray
@@ -407,7 +406,7 @@ abstract class AuroraTownDesignBase : CwfDesignBase() {
         mapOf(MOON_HALO to AuroraTownMoonGlow.haloPng(look)) + (if (AuroraTownMoonGlow.hasHole(look)) mapOf(MOON_HOLE to AuroraTownMoonGlow.holePng(look)) else emptyMap())
 
     /**
-     * The moon as the watch draws it (`"moon": true`, see [MoonPicture]): today's phase, turned as it
+     * The moon as the watch draws it (`"moon": true`, the moon template, see [MoonTemplate]): today's phase, turned as it
      * stands in the sky. A layer that stays on the face (`rest`), in the back slot below the aurora.
      */
     private fun moonLayer(): JSONObject {

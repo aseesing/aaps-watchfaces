@@ -4,6 +4,7 @@
 // ============================================================================================
 package app.aaps.wear.watchfaces
 
+import app.aaps.watchfaces.shorthand.MoonTemplate
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -16,7 +17,6 @@ import android.graphics.RectF
 import android.graphics.Shader
 import androidx.core.graphics.createBitmap
 import app.aaps.wear.watchfaces.daynight.MoonLight
-import app.aaps.wear.watchfaces.daynight.MoonPicture
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Random
@@ -41,7 +41,7 @@ import kotlin.math.sqrt
  * of the repository: `02-master.jpg` (the village, a round photo of 1024 x 1024 on a white surround,
  * lights off, no aurora, no moon) and `03-aurora.jpg` (only northern lights, on black). The unit tests
  * run in the folder of this project, so the default [sourceDir] is `xmas-bg`. The moon is the photo of
- * the full moon that the watch app draws itself ([MoonPicture]).
+ * the full moon that comes with the watch app, shaded by the moon template ([MoonTemplate]).
  *
  * The village is mirrored left to right (the church tower stands on the left) and fills the round
  * face. It is moved down by [PHOTO_SHIFT], so the star on the tree stays clear of the glucose value:
@@ -748,9 +748,9 @@ class AuroraTownImages(
         }
         val photoBytes = moonPhotoFile.readBytes()
         val moonPhoto = requireNotNull(BitmapFactory.decodeByteArray(photoBytes, 0, photoBytes.size)) { "Cannot read $moonPhotoFile" }
-        val moon = MoonPicture.draw(moonPhoto, size, MoonLight.Look(MOON_TERMINATOR, MOON_LIMB_ANGLE, 0.0))
+        val moon = MoonTemplate.draw(moonPhoto, size, MoonLight.Look(MOON_TERMINATOR, MOON_LIMB_ANGLE, 0.0))
         // The same moon fully lit tells how much light each pixel has, to make the dark part fainter
-        val full = MoonPicture.draw(moonPhoto, size, MoonLight.Look(-1.0, MOON_LIMB_ANGLE, 0.0))
+        val full = MoonTemplate.draw(moonPhoto, size, MoonLight.Look(-1.0, MOON_LIMB_ANGLE, 0.0))
         val pixels = IntArray(size * size)
         moon.getPixels(pixels, 0, size, 0, 0, size, size)
         val fullPixels = IntArray(size * size)
@@ -761,7 +761,7 @@ class AuroraTownImages(
             val p = pixels[y * size + x]
             val f = fullPixels[y * size + x]
             val lit = if (Color.alpha(f) == 0) 0f
-            else ((Color.alpha(p).toFloat() / Color.alpha(f) - MoonPicture.DARK_COVER.toFloat()) / (1 - MoonPicture.DARK_COVER.toFloat())).coerceIn(0f, 1f)
+            else ((Color.alpha(p).toFloat() / Color.alpha(f) - MoonTemplate.darkCover.toFloat()) / (1 - MoonTemplate.darkCover.toFloat())).coerceIn(0f, 1f)
             // The earth light on the dark part: there, but much fainter than the app draws it on its own
             val a = Color.alpha(p) / 255f * (MOON_EARTH_LIGHT + (1 - MOON_EARTH_LIGHT) * lit)
             if (a <= 0f) continue

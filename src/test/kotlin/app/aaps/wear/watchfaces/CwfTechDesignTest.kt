@@ -29,7 +29,6 @@ import app.aaps.wear.watchfaces.animation.WakeAnimator
 import app.aaps.wear.watchfaces.animation.WakeTimer
 import app.aaps.wear.watchfaces.daynight.DayNightClock
 import app.aaps.watchfaces.shorthand.DesignShorthand
-import app.aaps.wear.watchfaces.daynight.MoonPicture
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import org.json.JSONObject
@@ -90,7 +89,7 @@ class CwfTechDesignTest : CyberpunkDesignBase() {
         default, "Cyberpunk HUD for the night: big time and glucose, a small data table and the graph, the moon on the edge. No hands, no seconds"
     ).apply {
         // The moon goes along the edge through the night, from sunset (left) to sunrise (right). The
-        // watch draws it from its photo, lit and turned as it is in the sky now (see MoonPicture). The
+        // watch draws it from its photo, lit and turned as it is in the sky now (the moon template, see MoonTemplate). The
         // place in the json is the middle of its way; the watch moves it (see orbit).
         val top = orbit(JsonKeyValues.NIGHT_PROGRESS.key).point(0.5)
         place("freetext4", (top.first - MOON_SIZE / 2f).toInt(), (top.second - MOON_SIZE / 2f).toInt(), MOON_SIZE)
