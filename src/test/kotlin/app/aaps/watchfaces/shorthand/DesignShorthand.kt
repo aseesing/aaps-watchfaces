@@ -1,7 +1,6 @@
 package app.aaps.watchfaces.shorthand
 
 import app.aaps.shared.impl.weardata.CwfPlaceNeeds
-import app.aaps.wear.watchfaces.animation.BuiltInTemplates
 import app.aaps.wear.watchfaces.animation.Templates
 import app.aaps.wear.watchfaces.animation.WakeAnimationSpec
 import app.aaps.wear.watchfaces.animation.WakeAnimationJson
@@ -21,7 +20,8 @@ import kotlin.math.sin
  * What it rewrites:
  * - the effects of the `animation` (`rain`, `glitch`, `trace`, `blink`, `sweep`, `slide`, `wobble`,
  *   `pulse`, `glint`) become `{"use": "<name>", ...}` entries at the start of `layers`, in that order
- *   (a list effect gives one entry per view); the `fallbackBpm` of `pulse` goes to the animation;
+ *   (a list effect gives one entry per view); the `fallbackBpm` of `pulse` goes to the animation; the
+ *   templates the animation uses go into its `templates` ([DesignTemplates]), as the watch has none;
  * - a layer `"moon": true` becomes `"image": "@moon"`; `"shape": "band"` a rectangle with a linear
  *   gradient (its `x` was the middle, now the left edge), `"shape": "dot"` a circle with a radial one;
  * - a view with `"moonLight": true` gets `"image": "@moon"`; a view with an `orbit` gets a view layer
@@ -63,6 +63,9 @@ object DesignShorthand {
 
     /** The weathers the phone sends, in the order of their number in `v_weather_kind`. */
     val WEATHERS = StoredWeather.KINDS
+
+    /** The templates, to know their parameters. */
+    private val TEMPLATES = DesignTemplates.all()
 
     /** The new name of the moon picture of a view or a layer. */
     private const val MOON_IMAGE = "@moon"
@@ -192,8 +195,10 @@ object DesignShorthand {
                 after == null  -> if (before != null) patch.put(WakeAnimationSpec.JSON_KEY, JSONObject.NULL)
                 before == null -> patch.put(WakeAnimationSpec.JSON_KEY, after)
                 else           -> {
-                    // The whole animation, with the keys it lost removed, so the merge gives exactly it
+                    // The whole animation, with the keys and the templates it lost removed, so the merge gives exactly it
                     before.keys().forEach { if (!after.has(it)) after.put(it, JSONObject.NULL) }
+                    val lost = before.optJSONObject(WakeAnimationJson.TEMPLATES)
+                    after.optJSONObject(WakeAnimationJson.TEMPLATES)?.let { kept -> lost?.keys()?.forEach { if (!kept.has(it)) kept.put(it, JSONObject.NULL) } }
                     patch.put(WakeAnimationSpec.JSON_KEY, after)
                 }
             }
@@ -263,6 +268,12 @@ object DesignShorthand {
         animation.optJSONArray(WakeAnimationJson.LAYERS)?.let { own -> for (i in 0 until own.length()) own.optJSONObject(i)?.let { layers.put(newLayer(it)) } }
         orbits.forEach(layers::put)
         animation.put(WakeAnimationJson.LAYERS, layers)
+        // The watch knows no template: the animation brings the ones it uses
+        val own = animation.optJSONObject(WakeAnimationJson.TEMPLATES)
+        DesignTemplates.usedBy(layers, own)?.let { used ->
+            val templates = own ?: JSONObject().also { animation.put(WakeAnimationJson.TEMPLATES, it) }
+            used.keys().forEach { templates.put(it, used.opt(it)) }
+        }
         return animation
     }
 
@@ -272,7 +283,7 @@ object DesignShorthand {
             "trace" -> if (params.has("view") && params.optString("view").isEmpty()) return null
             "glint" -> if (params.objects("rings").isEmpty() && params.objects("boxes").isEmpty()) return null
         }
-        val known = BuiltInTemplates.all.optJSONObject(effect)?.optJSONObject(Templates.PARAMS) ?: return null
+        val known = TEMPLATES.optJSONObject(effect)?.optJSONObject(Templates.PARAMS) ?: return null
         return JSONObject().apply {
             put(Templates.USE, effect)
             params.keys().forEach { key -> if (known.has(key)) put(key, params.opt(key)) }

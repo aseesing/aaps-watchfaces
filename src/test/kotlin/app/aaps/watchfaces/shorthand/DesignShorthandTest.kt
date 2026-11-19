@@ -75,8 +75,12 @@ class DesignShorthandTest {
                }}"""
         )
         val animation = new.getJSONObject(WakeAnimationSpec.JSON_KEY)
-        assertThat(animation.keys().asSequence().toSet()).containsExactly("durationMs", "fallbackBpm", "layers")
+        assertThat(animation.keys().asSequence().toSet()).containsExactly("durationMs", "fallbackBpm", "layers", "templates")
         assertThat(animation.getInt("fallbackBpm")).isEqualTo(70)
+        // The watch has no templates: the animation brings the ones it uses, as the manual writes them
+        val templates = animation.getJSONObject("templates")
+        assertThat(templates.keys().asSequence().toList()).containsExactly("rain", "glitch", "trace", "blink", "sweep", "slide", "wobble", "pulse", "glint").inOrder()
+        for (name in templates.keys()) assertSameJson(templates.getJSONObject(name), DesignTemplates.all().getJSONObject(name))
         assertSameJson(
             animation.getJSONArray("layers"), JSONArray(
                 """[
@@ -95,6 +99,13 @@ class DesignShorthandTest {
                 ]"""
             )
         )
+    }
+
+    @Test
+    fun onlyTheTemplatesThatAreUsedGoIntoTheZip() {
+        val animation = translate("""{"animation": {"rain": {}, "blink": [{"views": ["b"], "valueKey": ""}]}}""").getJSONObject(WakeAnimationSpec.JSON_KEY)
+        assertThat(animation.getJSONObject("templates").keys().asSequence().toList()).containsExactly("rain")
+        assertThat(translate("""{"animation": {"layers": [{"shape": "circle"}]}}""").getJSONObject(WakeAnimationSpec.JSON_KEY).has("templates")).isFalse()
     }
 
     @Test
