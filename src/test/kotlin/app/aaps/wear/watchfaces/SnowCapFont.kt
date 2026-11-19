@@ -152,8 +152,11 @@ class SnowCapFontBuilder(private val source: TtfSource, private val shaper: Snow
 
     companion object {
 
-        /** The characters without a snow cap. */
-        const val BARE = ",."
+        /**
+         * The characters without a snow cap. The colon too: a face draws it in the text of the time, which
+         * has no cap view over it, so with snow cut out it would lose its top.
+         */
+        const val BARE = ",.:"
 
         /**
          * The advance of the character [code] in the fonts made from [source]: a digit gets the advance of
@@ -183,14 +186,15 @@ class SnowCapShaper(private val em: Double) {
 
     /**
      * The glyph of [contours] without the part under its cap [cap], so the cap shows when it is drawn
-     * below. The cap is first made [CUT_OVERLAP] smaller, so the glyph still covers the soft edge of
-     * the cap.
+     * below. The cap is first moved [CUT_OVERLAP] up, so the glyph still covers the soft lower edge of
+     * the cap. (Made smaller on all sides, the glyph showed a thin edge of colour beside the cap.)
      */
     fun cut(contours: List<TtfContour>, cap: List<TtfContour>): List<TtfContour> {
         val glyph = Area(Path2D.Double(Path2D.WIND_NON_ZERO).apply { contours.forEach { TtfOutlines.addContour(this, it) } })
         if (cap.isNotEmpty()) {
             val snow = Area(Path2D.Double(Path2D.WIND_NON_ZERO).apply { cap.forEach { TtfOutlines.addContour(this, it) } })
-            glyph.subtract(erode(snow, CUT_OVERLAP * em))
+            // The snow moved up: the cut digit reaches under the soft lower edge of the cap, but not out beside it
+            glyph.subtract(snow.createTransformedArea(AffineTransform.getTranslateInstance(0.0, CUT_OVERLAP * em)))
         }
         // Only crumbs are left out: a small hole (of a 4 or an 8) must stay
         val minArea = CUT_MIN_PIECE * CUT_MIN_PIECE * em * em
@@ -205,9 +209,13 @@ class SnowCapShaper(private val em: Double) {
         val box = glyph.bounds2D
         val height = box.height
         val tall = height > 0.4 * em
-        // Grown to the outside only: the snow hangs over the outer edge, the holes stay as they are
+        // Grown to the outside only, the holes stay as they are. The snow lies on top ([GROW] up) and
+        // makes the digit a little bigger on every side ([SIDE_GROW], about a pixel), the same all round:
+        // 2 px stuck out beside a digit where its edge turns in below the snow, and much less looked
+        // smaller than the digit where it bulges out below the snow (the right of a 2).
         val grown = Area(outer).apply {
-            add(Area(roundStroke(2 * GROW * em).createStrokedShape(outer)))
+            add(Area(outer).createTransformedArea(AffineTransform.getTranslateInstance(0.0, GROW * em)))
+            add(Area(roundStroke(2 * SIDE_GROW * em).createStrokedShape(outer)))
             subtract(holes)
         }
 
@@ -222,8 +230,8 @@ class SnowCapShaper(private val em: Double) {
         if (tall) addDrips(region, glyph, box.minX, box.width, height, waveY, amplitude, random)
 
         val cap = Area(grown).apply { intersect(region) }
-        // Thick snow piles up a little higher than the overhang at the sides
-        cap.add(cap.createTransformedArea(AffineTransform.getTranslateInstance(0.0, PILE * em)).apply { subtract(holes) })
+        // Thick snow piles up a little higher than the overhang at the sides (none since 2026-11-19: it made the snow look too high)
+        if (PILE > 0.0) cap.add(cap.createTransformedArea(AffineTransform.getTranslateInstance(0.0, PILE * em)).apply { subtract(holes) })
         // Soft edges: fill the inner corners (where a drip leaves the wave), then round the outer ones
         return open(close(cap, CLOSE_RADIUS * em), OPEN_RADIUS * em)
     }
@@ -275,8 +283,11 @@ class SnowCapShaper(private val em: Double) {
 
     companion object {
 
-        /** How far the snow hangs over the edges and lies above the top, in em (stroke width / 2). */
+        /** How far the snow lies above the top, in em. */
         const val GROW = 0.035
+
+        /** How far the snow hangs over the edges at the sides, in em (stroke width / 2): about a pixel at the size of the time. */
+        const val SIDE_GROW = 0.02
 
         /** Depth of the snow line below the top of a digit, as part of its height. */
         const val DEPTH = 0.27
@@ -284,8 +295,8 @@ class SnowCapShaper(private val em: Double) {
         /** The same for small parts (the dots of the colon, the minus). */
         const val SMALL_DEPTH = 0.42
 
-        /** How much higher the snow lies on the top than at the sides, in em. */
-        const val PILE = 0.025
+        /** How much higher the snow lies on the top than at the sides, in em. 0: the snow lay too high on the digits. */
+        const val PILE = 0.0
 
         const val WAVE_AMPLITUDE = 0.02
         const val WAVE_LENGTH = 0.24

@@ -159,16 +159,21 @@ class SnowCapFontTest {
     }
 
     @Test
-    fun capOfEightLiesOnTopAndSticksOut() {
+    fun capOfEightLiesOnTopAndIsALittleWider() {
         val baseInk = Ink(mask(base, "8", 300f))
         val capInk = Ink(mask(cap, "8", 300f))
         val height = baseInk.bottom - baseInk.top
         assertThat(capInk.count).isGreaterThan(0)
-        // Higher than the digit, and a little wider on both sides
+        // Higher than the digit, and a little wider on both sides, the same on each (SIDE_GROW is 6 px at this
+        // size). Much more stuck out beside a digit whose edge turns in below the snow; much less looked
+        // smaller than a digit that bulges out below it (the user, 2026-11-19)
         assertThat(capInk.top).isLessThan(baseInk.top - 3)
         val band = baseInk.top..baseInk.top + (0.25 * height).toInt()
-        assertThat(capInk.left).isLessThan(baseInk.leftIn(band) - 3)
-        assertThat(capInk.right).isGreaterThan(baseInk.rightIn(band) + 3)
+        val left = baseInk.leftIn(band) - capInk.left
+        val right = capInk.right - baseInk.rightIn(band)
+        assertThat(left).isIn(3..9)
+        assertThat(right).isIn(3..9)
+        assertThat(abs(left - right)).isAtMost(2)
         // Only in the top part (drips included)
         assertThat(capInk.bottom).isLessThan(baseInk.top + (0.6 * height).toInt())
         assertThat(capInk.countAbove(baseInk.top + (0.45 * height).toInt()).toDouble() / capInk.count).isAtLeast(0.95)
