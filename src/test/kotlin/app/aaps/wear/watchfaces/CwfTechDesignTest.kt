@@ -35,7 +35,6 @@ import com.google.common.truth.Truth.assertWithMessage
 import org.json.JSONObject
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.ByteArrayOutputStream
@@ -66,10 +65,11 @@ import kotlin.math.sqrt
  * The layout is the same in all four Cyberpunk designs (see [CyberpunkDesignBase.layout]), so the
  * layout tests are here only.
  */
-@RunWith(RobolectricTestRunner::class)
+@RunWith(PartRunner::class)
+@Part(0, 2)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35])
-class CwfTechDesignTest : CyberpunkDesignBase() {
+open class CwfTechDesignTest : CyberpunkDesignBase() {
 
     override val displayName = "Cyberpunk Tech"
     override val fileName = "Cyberpunk_Tech"
@@ -632,7 +632,9 @@ class CwfTechDesignTest : CyberpunkDesignBase() {
         var clock = 0L
         val animator = WakeAnimator(heartRate = { 72 }, timer = WakeTimer { clock })
         animator.setDesign(readAnimation(design, images))
-        val dir = File(out, "anim").apply { deleteRecursively(); mkdirs() }
+        // Only its own frames: the D2 test writes its frames to the same folder, maybe at the same time
+        val dir = File(out, "anim").apply { mkdirs() }
+        dir.listFiles { f -> f.name.startsWith("tech_") }?.forEach { it.delete() }
         val now = System.currentTimeMillis()
         // The frames the checks and the zoom sheet look at, by time; the top of a beat at 72 bpm is 120 ms after it starts
         val zoomMs = listOf(0L, 125L, 250L, 958L, 3000L, 5791L)
@@ -802,3 +804,7 @@ class CwfTechDesignTest : CyberpunkDesignBase() {
         val EVENING_MS: Long = NIGHT_MS - 3 * 3_600_000L
     }
 }
+
+// The other parts of the tests above, so they run side by side: see [PartRunner]
+@Part(1, 2)
+class CwfTechDesignTestPart1 : CwfTechDesignTest()

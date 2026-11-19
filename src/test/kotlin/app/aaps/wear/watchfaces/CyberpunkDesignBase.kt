@@ -1102,7 +1102,7 @@ abstract class CyberpunkDesignBase : CwfDesignBase() {
     private fun renderBatteries(design: JSONObject, default: CwfData, images: Map<String, ByteArray>, watch: Int?, phone: String): Bitmap {
         val face = storedFace(design, default, images, previewInstant, watchBattery = watch)
         storeSampleData(face, phoneBattery = phone)
-        Thread.sleep(600)   // past the render data share window
+        forgetLoadedRenderData(face)
         face.refreshRenderData()
         return face.renderToBitmap(800, 800)
     }
