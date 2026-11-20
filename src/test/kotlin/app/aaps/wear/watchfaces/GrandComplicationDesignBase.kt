@@ -86,10 +86,14 @@ import kotlin.math.sqrt
  * Each design comes in two zips: the animated one for the AAPS fork, and a copy for plain AAPS 4.0
  * ([animated] false, `*_AAPS4.zip`): no wake-up animation, no sun, moon or weather, no watch battery.
  *
- * All type is Bodoni Moda, a Didone like the big date of the Lange 1: the texts in the bold cut that
- * the zip brings ([FONT]), so the watch draws the same letters as the previews; the printing on the
- * dial in the semibold cut ([PRINT_FONT], in the dial picture only). Both are cut to Latin-1, see
- * `cwf-designs/fonts/BodoniModa-OFL.txt`. Every text is at least [MIN_TEXT] high.
+ * The big type is Bodoni Moda, a Didone like the big date of the Lange 1: the glucose value in the
+ * bold cut ([SGV_FONT], only its digits), the Roman numerals on the dial in the semibold cut
+ * ([PRINT_FONT], in the dial picture only). The hairlines of a Didone get lost on a small screen
+ * (a 4 then looks like a 1), so all small type is Roboto Condensed Bold ([FONT]), a sans serif with
+ * one stroke width: the age, the loop warning, the date, the steps, the disc and the numbers of the
+ * glucose scale. It is narrow, so the small texts can be bigger in the same windows. The watch app of
+ * every AAPS has it built in, so the zip only brings the digits of Bodoni; the previews draw it from
+ * the AAPS checkout. See `cwf-designs/fonts/BodoniModa-OFL.txt`. Every text is at least [MIN_TEXT] high.
  */
 abstract class GrandComplicationDesignBase : CwfDesignBase() {
 
@@ -148,11 +152,13 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
     /** The settings of the preview in the zip: the animated design shows its sky, the plain one the IOB and the COB. */
     protected open val previewOptions: Options get() = if (animated) Options() else Options(iob = true, cob = true)
 
-    private val fontFile = File("cwf-designs/fonts/$FONT.ttf")
+    /** The built-in font [FONT], as the watch app has it. */
+    private val fontFile = File(AapsDir.get(), "wear/src/main/res/font/roboto_condensed_bold.ttf")
+    private val sgvFile = File("cwf-designs/fonts/$SGV_FONT.ttf")
     private val printFile = File("cwf-designs/fonts/$PRINT_FONT.ttf")
 
-    /** The zip brings its own font, so the watch draws the same letters as these previews and as the printing on the dial. */
-    override fun fonts(): Map<String, ByteArray> = mapOf(FONT to fontFile.readBytes())
+    /** The zip brings the digits of Bodoni for the glucose value; the small texts use the font built into the watch app. */
+    override fun fonts(): Map<String, ByteArray> = mapOf(SGV_FONT to sgvFile.readBytes())
 
     /** The licence of the font goes with it. */
     override fun otherFiles(): Map<String, ByteArray> = mapOf(FONT_LICENCE to File("cwf-designs/fonts/$FONT_LICENCE").readBytes())
@@ -166,13 +172,19 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         face.sp.putBoolean(R.string.key_show_complication_1, options.complication)
     }
 
-    override fun valueTypeface(): Typeface = serif()
+    override fun valueTypeface(): Typeface = textFace()
 
-    /** The font of the texts on the watch: Bodoni Moda Bold. */
-    private fun serif(): Typeface = Typeface.createFromFile(fontFile)
+    /** The font of the small texts on the watch and of the numbers of the glucose scale: Roboto Condensed Bold. */
+    private fun textFace(): Typeface = Typeface.createFromFile(fontFile)
 
-    /** The font of the printing on the dial picture: Bodoni Moda SemiBold, a little finer than the texts. */
+    /** The font of the glucose value: the digits of Bodoni Moda Bold. */
+    private fun sgvFace(): Typeface = Typeface.createFromFile(sgvFile)
+
+    /** The font of the Roman numerals on the dial picture: Bodoni Moda SemiBold. */
     private fun printFace(): Typeface = Typeface.createFromFile(printFile)
+
+    /** The typeface of the font [name] of the zip. */
+    private fun faceOf(name: String): Typeface = if (name == SGV_FONT) sgvFace() else textFace()
 
     /** Only the steps: complication 2. */
     override fun drawComplicationValues(canvas: Canvas, design: JSONObject, type: ComplicationType) {
@@ -183,11 +195,11 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
     // The design json
     // ------------------------------------------------------------------------------------------
 
-    /** A text view in the font of the zip ([FONT]), its digits and capitals in the middle of [r] (see [centredText]). */
-    private fun JSONObject.text(key: String, r: RectF, size: Int, gravity: String, color: String): JSONObject {
-        val (top, height) = centredText(r, size, serif())
+    /** A text view in the font [font] of the zip, its digits and capitals in the middle of [r] (see [centredText]). */
+    private fun JSONObject.text(key: String, r: RectF, size: Int, gravity: String, color: String, font: String = FONT): JSONObject {
+        val (top, height) = centredText(r, size, faceOf(font))
         return place(key, r.left.toInt(), top, r.width().toInt(), height)
-            .put("textsize", size).put("gravity", gravity).put("fontColor", color).put("font", FONT).put("fontStyle", "normal")
+            .put("textsize", size).put("gravity", gravity).put("fontColor", color).put("font", font).put("fontStyle", "normal")
     }
 
     /** A view that only shows a picture (no text: transparent, also when the watch writes into it, like the patient name), placed as a square of [size] around [x], [y]. */
@@ -233,7 +245,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         place("minute_hand", 0, 0, 400)
 
         // The glucose value and its arrow in the window; the age and the loop warning under it, red, only when old
-        text("sgv", SGV_BOX, SGV_SIZE, "center", p.sgvMid)
+        text("sgv", SGV_BOX, SGV_SIZE, "center", p.sgvMid, SGV_FONT)
         place("direction", ARROW_BOX.left.toInt(), ARROW_BOX.top.toInt(), ARROW_BOX.width().toInt())
         text("timestamp", AGE_BOX, ALARM_SIZE, "center", p.alarm).put("dynData", AGE_DYN)
         text("loop", LOOP_BOX, ALARM_SIZE, "center", p.alarm)
@@ -428,8 +440,8 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         drawArc(RectF((cx - radius) * s, (cy - radius) * s, (cx + radius) * s, (cy + radius) * s), from - 90f, to - from, false, paint)
     }
 
-    private fun Canvas.label(text: String, x: Float, y: Float, size: Float, hex: String) {
-        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = color(hex); textSize = size * SCALE; textAlign = Paint.Align.CENTER; typeface = printFace() }
+    private fun Canvas.label(text: String, x: Float, y: Float, size: Float, hex: String, face: Typeface) {
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = color(hex); textSize = size * SCALE; textAlign = Paint.Align.CENTER; typeface = face }
         drawText(text, x * SCALE, (y - (p.fontMetrics.ascent + p.fontMetrics.descent) / 2f / SCALE) * SCALE, p)
     }
 
@@ -483,7 +495,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         // Roman numerals where nothing else is
         for ((text, hour) in listOf("XII" to 0, "I" to 1, "II" to 2, "X" to 10, "XI" to 11)) {
             val (x, y) = polar(200f, 200f, NUMERAL_R, hour * 30f)
-            canvas.label(text, x, y, NUMERAL_SIZE, p.ink)
+            canvas.label(text, x, y, NUMERAL_SIZE, p.ink, printFace())
         }
         glucoseBand(canvas)
         // Plain AAPS does not know the battery of the watch
@@ -529,7 +541,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
             canvas.drawLine(x1 * s, y1 * s, x2 * s, y2 * s, paint(p.ink, width = if (major) 2f else 1f))
             if (major) {
                 val (x, y) = polar(FAN_X, FAN_Y, FAN_LABEL_R, angle)
-                canvas.label(scaleLabel(value, mgdl), x, y, FAN_LABEL_SIZE, p.ink)
+                canvas.label(scaleLabel(value, mgdl), x, y, FAN_LABEL_SIZE, p.ink, textFace())
             }
         }
         return pngBytes(image)
@@ -822,7 +834,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
 
     private fun countNear(bitmap: Bitmap, point: Pair<Float, Float>, half: Int, hex: String, tolerance: Int = 40) = around(bitmap, point, half).count { near(it, hex, tolerance) }
 
-    private fun textWidth(text: String, size: Int): Float = Paint().apply { textSize = size.toFloat(); typeface = serif() }.measureText(text)
+    private fun textWidth(text: String, size: Int, face: Typeface = textFace()): Float = Paint().apply { textSize = size.toFloat(); typeface = face }.measureText(text)
 
     // ------------------------------------------------------------------------------------------
     // The tests
@@ -863,9 +875,10 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         )
         for (key in listOf(CwfMetadataKey.CWF_PREF_WATCH_SHOW_DELTA, CwfMetadataKey.CWF_PREF_WATCH_SHOW_AVG_DELTA, CwfMetadataKey.CWF_PREF_WATCH_SHOW_DATE))
             assertWithMessage("$key").that(metadata[key]).isEqualTo("true")
-        // The font is in the zip, and every text uses it
-        assertThat(loaded.cwfData.resData[FONT]?.format).isEqualTo(ResFormat.TTF)
-        for (key in listOf("sgv", "timestamp", "loop", "day_name", "day", STEPS_VIEW)) assertWithMessage(key).that(design.getJSONObject(key).getString("font")).isEqualTo(FONT)
+        // The glucose value in the Bodoni of the zip, every other text in the built-in Roboto Condensed Bold
+        assertThat(loaded.cwfData.resData[SGV_FONT]?.format).isEqualTo(ResFormat.TTF)
+        assertThat(design.getJSONObject("sgv").getString("font")).isEqualTo(SGV_FONT)
+        for (key in listOf("timestamp", "loop", "day_name", "day", STEPS_VIEW, DISC_SLOT, IOB_VIEW, COB_VIEW)) assertWithMessage(key).that(design.getJSONObject(key).getString("font")).isEqualTo(FONT)
         // Every picture a view, a dynData, a dynPref or a weather look names is in the zip
         assertThat(loaded.cwfData.resData.keys).containsAtLeastElementsIn(images.keys)
         val named = Regex("\"(?:image\\d+|invalidImage|background)\":\"([^\"]+)\"").findAll(design.toString()).map { it.groupValues[1] }.toSet()
@@ -974,7 +987,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         assertThat(design.getJSONObject(STEPS_VIEW).getInt("textsize")).isAtLeast(MIN_TEXT)
         assertThat(FAN_LABEL_SIZE).isAtLeast(MIN_TEXT.toFloat())
         // The widest texts fit: a high glucose value in mmol/L and in mg/dL, the widest day, the loop warning
-        for (value in listOf("22,2", "18,8", "400")) assertWithMessage(value).that(textWidth(value, SGV_SIZE)).isAtMost(SGV_BOX.width())
+        for (value in listOf("22,2", "18,8", "400")) assertWithMessage(value).that(textWidth(value, SGV_SIZE, sgvFace())).isAtMost(SGV_BOX.width())
         for (day in listOf("WED", "THU", "MON")) assertWithMessage(day).that(textWidth(day, DATE_SIZE)).isAtMost(DAY_NAME_BOX.width())
         assertThat(textWidth("30", DATE_SIZE)).isAtMost(DAY_BOX.width())
         assertThat(textWidth("LOOP 99'", ALARM_SIZE)).isAtMost(LOOP_BOX.width())
@@ -988,7 +1001,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         val arrowRight = ARROW_BOX.left + ARROW_BOX.width() * 104f / 120f
         val gap = arrowLeft - SGV_BOX.right
         for (value in listOf("45", "3,9", "6,7", "120", "10,4", "22,2", "400")) {
-            val width = textWidth(value, SGV_SIZE)
+            val width = textWidth(value, SGV_SIZE, sgvFace())
             val left = SGV_BOX.centerX() - width / 2f
             val middle = (left + arrowRight) / 2f
             assertWithMessage("$value and arrow: middle $middle").that(abs(middle - BG_WINDOW.centerX())).isAtMost(CENTRE_TOLERANCE)
@@ -1278,8 +1291,8 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         fun numberAt(picture: Bitmap, mgdlValue: Double): Int = pixelsNear(picture, polar(FAN_X, FAN_Y, FAN_LABEL_R, bgAngle(mgdlValue)).let { (x, y) -> RectF(x - 6f, y - 7f, x + 6f, y + 7f) }, palette.ink, 40)
         for (value in MGDL_LABELS) assertWithMessage("mg/dL $value").that(numberAt(mgdl, value)).isGreaterThan(8)
         for (value in LABELS) assertWithMessage("mmol/L $value").that(numberAt(mmol, value * MGDL_PER_MMOL)).isGreaterThan(8)
-        // 250 mg/dL is far from every mmol/L number: there the mmol/L scale is empty
-        assertThat(numberAt(mmol, 250.0)).isEqualTo(0)
+        // 250 mg/dL is far from every mmol/L number: there the mmol/L scale is empty, but for the edge of the 15 beside it
+        assertThat(numberAt(mmol, 250.0)).isAtMost(8)
         // The same scale: the ends, the band and the hand do not change
         assertThat(scaleTicks(true).first().first).isEqualTo(BG_MIN)
         assertThat(scaleTicks(true).last().first).isEqualTo(BG_MAX)
@@ -1335,8 +1348,12 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         /** The smallest text on the face, in design units (about 23 pixels on a 466 pixel screen). */
         const val MIN_TEXT = 20
 
-        /** The font in the zip, of every text (Bodoni Moda Bold), and the one of the printing on the dial (SemiBold, not in the zip). */
-        const val FONT = "BodoniModaBold"
+        /**
+         * The fonts: Roboto Condensed Bold (built into the watch app) for every small text, the digits of Bodoni
+         * Moda Bold (in the zip) for the glucose value. Bodoni Moda SemiBold prints the Roman numerals on the dial.
+         */
+        val FONT = JsonKeyValues.ROBOTO_CONDENSED_BOLD.key
+        const val SGV_FONT = "BodoniModaDigits"
         const val PRINT_FONT = "BodoniModaSemiBold"
 
         const val JPEG_QUALITY = 90
@@ -1362,7 +1379,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         const val BAND_R = 73f
         const val BAND_WIDTH = 8f
         const val FAN_LABEL_R = 96f
-        const val FAN_LABEL_SIZE = 20f
+        const val FAN_LABEL_SIZE = 22f
         const val FAN_MIN_ANGLE = -60f
         const val FAN_MAX_ANGLE = 60f
         const val BG_MIN = 40.0
@@ -1390,7 +1407,7 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         val ARROW_BOX = RectF(226f, 231f, 266f, 271f)
         val AGE_BOX = RectF(124f, 284f, 180f, 308f)
         val LOOP_BOX = RectF(180f, 284f, 276f, 308f)
-        const val ALARM_SIZE = 20
+        const val ALARM_SIZE = 23
 
         /** How far a value with its arrow, or the date, may be from the middle of its window. */
         const val CENTRE_TOLERANCE = 6f
@@ -1399,12 +1416,12 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
         val DATE_WINDOW = RectF(262f, 183f, 360f, 217f)
         val DAY_NAME_BOX = RectF(264f, 185f, 322f, 215f)
         val DAY_BOX = RectF(324f, 185f, 358f, 215f)
-        const val DATE_SIZE = 22
+        const val DATE_SIZE = 25
 
         /** The steps window at 6 o'clock: complication 2. */
         val STEPS_WINDOW = RectF(140f, 316f, 260f, 352f)
         val STEPS_BOX = RectF(142f, 318f, 258f, 350f)
-        const val STEPS_SIZE = 24
+        const val STEPS_SIZE = 27
         const val STEPS_VIEW = "complication2"
         const val STEPS_SAMPLE = 6482L
         const val HEART_SAMPLE = 72L
@@ -1428,12 +1445,12 @@ abstract class GrandComplicationDesignBase : CwfDesignBase() {
          * IOB and COB in the disc: two lines, [DISC_LINE_GAP] apart (one line in the middle when only one
          * shows). The views are as wide as the disc; the usual values fit inside its frame.
          */
-        const val DISC_SIZE = 20
-        const val DISC_LINE_GAP = 24f
-        const val DISC_LINE_HEIGHT = 26f
+        const val DISC_SIZE = 23
+        const val DISC_LINE_GAP = 26f
+        const val DISC_LINE_HEIGHT = 28f
         const val DISC_TEXT_WIDTH = 84f
         /** Detailed IOB, "(0.90|0.35)": smaller, so it fits. */
-        const val DETAIL_SIZE = 13
+        const val DETAIL_SIZE = 14
         /** The ring of a complication with a range, along the inside of the disc. */
         const val DISC_RING = 4
 
