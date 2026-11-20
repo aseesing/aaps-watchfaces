@@ -1,10 +1,12 @@
 Copyright 2020 The Bodoni Moda Project Authors (https://github.com/indestructible-type/Bodoni)
 
-BodoniModaBold.ttf and BodoniModaSemiBold.ttf are Bodoni Moda (Google Fonts, variable font
-BodoniModa[opsz,wght].ttf) fixed at weight 700 and 600, optical size 11 pt, and cut to Latin-1
-and a few signs for the Grand Complication designs:
-fonttools varLib.instancer BodoniModa[opsz,wght].ttf wght=700 opsz=11
+BodoniModaSemiBold.ttf is Bodoni Moda (Google Fonts, variable font BodoniModa[opsz,wght].ttf) fixed
+at weight 600, optical size 11 pt, and cut to Latin-1 and a few signs, for the Roman numerals on the
+dial of the Grand Complication designs. BodoniModaDigits.ttf is the same font at weight 700, cut to
+the digits and the signs of a glucose value, for the big glucose value:
+fonttools varLib.instancer BodoniModa[opsz,wght].ttf wght=600 opsz=11   (and wght=700 for the digits)
 pyftsubset <instance>.ttf --unicodes="U+0020-00FF,U+2013-2014,U+2018-201E,U+2032-2033,U+2190-2193,U+2212" --layout-features=kern --no-hinting --drop-tables+=DSIG,FFTM,STAT
+pyftsubset <instance 700>.ttf --unicodes="U+0020,U+002B-002E,U+0030-0039,U+2212" --layout-features=kern --no-hinting --drop-tables+=DSIG,FFTM,STAT
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
