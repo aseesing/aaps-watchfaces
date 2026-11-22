@@ -21,9 +21,15 @@ zips show the sky with the sun and the moon in the disc; the `_AAPS4` zips show 
 |:-:|:-:|:-:|
 | ![Cyberpunk Tech](images/cyberpunk_tech.gif) | ![Cyberpunk Weather](images/cyberpunk_weather.gif) | ![Cyberpunk Yellow](images/cyberpunk_yellow.gif) |
 | ![Wilds Weather](images/wilds_weather.gif) | ![Grand Complication Day](images/grand_complication_day.gif) | ![Grand Complication Night](images/grand_complication_night.gif) |
-| | ![D2](images/d2.gif) | |
+| | ![D2](images/d2.gif) | [![BG Reactor](images/bg_reactor/wake_good_rising_slow.gif)](docs/bg-reactor.md) |
 
-The designs are not drawn by hand. A test builds each one with the real watch face code of AAPS: it
+**[BG Reactor](docs/bg-reactor.md)** (`BG_Reactor.zip`) is a neon reactor in the colour of your
+glucose, from red through green and blue to orange. It moves up, down or round with your trend
+when you raise your wrist. It has IOB and COB bars and four octagon complication pods. Its page shows it
+at different glucose values and trends. Unlike the faces above, it is made with the face editor
+(`facetool`), not by a design test here.
+
+The other designs are not drawn by hand. A test builds each one with the real watch face code of AAPS: it
 draws the face, checks it (no text cut off, everything on the round screen, ...) and writes the zip.
 
 ## It needs AAPS
